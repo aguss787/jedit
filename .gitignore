@@ -1,0 +1,4 @@
+/target
+
+/tarpaulin-report.html
+/**/snapshots/*.new
