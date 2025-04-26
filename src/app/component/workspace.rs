@@ -28,10 +28,10 @@ use super::confirm_dialog::ConfirmDialog;
 pub struct WorkTree {
     file_root: Node,
     work_tree_root: WorkTreeNode,
+    is_unsaved: bool,
 
     list: List<'static>,
-    confirm_dialog: Option<ConfirmDialog>,
-    edit_error_dialog: Option<ConfirmDialog>,
+    dialogs: Vec<ConfirmDialog>,
 }
 
 impl WorkTree {
@@ -41,18 +41,14 @@ impl WorkTree {
         Self {
             file_root,
             work_tree_root,
+            is_unsaved: false,
             list,
-            confirm_dialog: None,
-            edit_error_dialog: None,
+            dialogs: Vec::new(),
         }
     }
 
     pub fn handle_event(&self, actions: &mut Actions, event: Event) {
-        if let Some(dialog) = [&self.confirm_dialog, &self.edit_error_dialog]
-            .into_iter()
-            .flatten()
-            .next()
-        {
+        if let Some(dialog) = self.dialogs.first() {
             dialog.handle_event(actions, event);
             return;
         }
@@ -75,7 +71,7 @@ impl WorkTree {
                 actions.push(Action::Navigation(NavigationAction::Close));
             }
             KeyCode::Char('q') => {
-                actions.push(Action::Exit);
+                actions.push(Action::Exit(ConfirmAction::Request(())));
             }
             KeyCode::Char('e') => {
                 actions.push(Action::Edit);
@@ -117,17 +113,15 @@ impl WorkTree {
         writer_getter: F,
     ) -> std::io::Result<()> {
         match confirm_action {
-            ConfirmAction::Request(()) => {
-                self.confirm_dialog = Some(ConfirmDialog::new(
-                    Text::from("write file?"),
-                    Box::new(ConfirmAction::action_confirmer(Action::Save)),
-                ))
-            }
+            ConfirmAction::Request(()) => self.dialogs.push(ConfirmDialog::new(
+                Text::from("Write file?").centered(),
+                Box::new(ConfirmAction::action_confirmer(Action::Save)),
+            )),
             ConfirmAction::Confirm(ok) => {
                 if ok {
-                    self.write_on_index(writer_getter(), 0)?;
+                    self.save(writer_getter())?;
                 }
-                self.confirm_dialog = None
+                self.dialogs.pop();
             }
         }
         Ok(())
@@ -136,19 +130,38 @@ impl WorkTree {
     pub fn handle_edit_error_action(&mut self, confirm_action: ConfirmAction<String>) -> bool {
         match confirm_action {
             ConfirmAction::Request(message) => {
-                self.edit_error_dialog = Some(ConfirmDialog::new(
+                self.dialogs.push(ConfirmDialog::new(
                     Text::from(vec![
-                        Line::from("json error:"),
+                        Line::from("JSON error:"),
                         Line::from(message),
                         Line::from(""),
-                        Line::from("continue to edit?").centered(),
+                        Line::from("Continue to edit?").centered(),
                     ]),
                     Box::new(ConfirmAction::action_confirmer(Action::EditError)),
                 ));
                 false
             }
             ConfirmAction::Confirm(ok) => {
-                self.edit_error_dialog = None;
+                self.dialogs.pop();
+                ok
+            }
+        }
+    }
+
+    pub fn maybe_exit(&mut self, confirm_action: ConfirmAction<()>) -> bool {
+        match confirm_action {
+            ConfirmAction::Request(()) => {
+                if self.is_unsaved {
+                    self.dialogs.push(ConfirmDialog::new(
+                        Text::from(vec![Line::from("Discard unsaved changes?").centered()]),
+                        Box::new(ConfirmAction::action_confirmer(Action::Exit)),
+                    ));
+                }
+
+                !self.is_unsaved
+            }
+            ConfirmAction::Confirm(ok) => {
+                self.dialogs.pop();
                 ok
             }
         }
@@ -179,11 +192,15 @@ impl WorkTree {
         Ok(true)
     }
 
-    pub fn write_on_index(
-        &self,
-        mut writer: impl Write,
-        index: usize,
-    ) -> Result<(), std::io::Error> {
+    fn save(&mut self, writer: impl Write) -> Result<(), std::io::Error> {
+        let res = self.write_on_index(writer, 0);
+        if res.is_ok() {
+            self.is_unsaved = false;
+        }
+        res
+    }
+
+    fn write_on_index(&self, mut writer: impl Write, index: usize) -> Result<(), std::io::Error> {
         let selector = self.work_tree_root.selector(index);
         let content = self
             .file_root
@@ -211,6 +228,7 @@ impl WorkTree {
             .replace(&selector, new_node)
             .expect("broken selector");
         self.reindex(index, node_index);
+        self.is_unsaved = true;
         Ok(())
     }
 
@@ -254,10 +272,7 @@ impl StatefulWidget for &WorkTree {
                 .position(state.list_state.selected().unwrap_or_default()),
         );
 
-        for dialog in [&self.confirm_dialog, &self.edit_error_dialog]
-            .into_iter()
-            .flatten()
-        {
+        for dialog in &self.dialogs {
             dialog.render(area, buf);
         }
     }
@@ -321,7 +336,7 @@ mod test {
         let worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
 
         for (key, action) in [
-            (KeyCode::Char('q'), Action::Exit),
+            (KeyCode::Char('q'), Action::Exit(ConfirmAction::Request(()))),
             (KeyCode::Char('e'), Action::Edit),
             (KeyCode::Char('w'), Action::Save(ConfirmAction::Request(()))),
         ] {
@@ -450,14 +465,14 @@ mod test {
         let mut worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
 
         assert!(!worktree.handle_edit_error_action(ConfirmAction::Request(String::from("error"))));
-        assert!(worktree.edit_error_dialog.is_some());
+        assert_eq!(worktree.dialogs.len(), 1);
         assert!(!worktree.handle_edit_error_action(ConfirmAction::Confirm(false)));
-        assert!(worktree.edit_error_dialog.is_none());
+        assert!(worktree.dialogs.is_empty());
 
         assert!(!worktree.handle_edit_error_action(ConfirmAction::Request(String::from("error"))));
-        assert!(worktree.edit_error_dialog.is_some());
+        assert_eq!(worktree.dialogs.len(), 1);
         assert!(worktree.handle_edit_error_action(ConfirmAction::Confirm(true)));
-        assert!(worktree.edit_error_dialog.is_none());
+        assert!(worktree.dialogs.is_empty());
     }
 
     #[test]
@@ -514,6 +529,47 @@ mod test {
             &worktree,
             &mut WorkTreeState::default()
         ));
+    }
+
+    #[test]
+    fn exit_without_change_test() {
+        let json = String::from("123");
+        let mut worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
+        assert!(worktree.maybe_exit(ConfirmAction::Request(())));
+
+        let state = WorkTreeState::default();
+        worktree
+            .load_selected(&state, String::from("456").as_bytes())
+            .unwrap();
+        assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
+        assert!(!worktree.maybe_exit(ConfirmAction::Confirm(false)));
+
+        worktree
+            .load_selected(&state, String::from("123").as_bytes())
+            .unwrap();
+        assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
+        assert!(worktree.maybe_exit(ConfirmAction::Confirm(true)));
+
+        worktree
+            .load_selected(&state, String::from("123").as_bytes())
+            .unwrap();
+        let mut buffer = Vec::new();
+        worktree.save(&mut buffer).unwrap();
+        assert!(worktree.maybe_exit(ConfirmAction::Request(())));
+    }
+
+    #[test]
+    fn render_exit_confirm_test() {
+        let json = String::from("123");
+        let mut worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
+
+        let mut state = WorkTreeState::default();
+        worktree
+            .load_selected(&state, String::from("456").as_bytes())
+            .unwrap();
+        assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
+
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state,));
     }
 
     fn assert_key_event_to_action(

@@ -25,7 +25,7 @@ impl<T> ConfirmAction<T> {
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone))]
 pub enum Action {
-    Exit,
+    Exit(ConfirmAction<()>),
     Navigation(NavigationAction),
     Edit,
     EditError(ConfirmAction<String>),
@@ -67,9 +67,12 @@ mod test {
     fn actions_in_order_test() {
         let mut actions = Actions::new();
         actions.push(Action::Edit);
-        actions.push(Action::Exit);
+        actions.push(Action::Exit(ConfirmAction::Request(())));
         assert_eq!(actions.next(), Some(Action::Edit));
-        assert_eq!(actions.next(), Some(Action::Exit));
+        assert_eq!(
+            actions.next(),
+            Some(Action::Exit(ConfirmAction::Request(())))
+        );
         assert_eq!(actions.next(), None);
     }
 }

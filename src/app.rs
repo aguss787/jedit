@@ -79,8 +79,8 @@ impl CliApp {
 
             while let Some(action) = actions.next() {
                 match action {
-                    Action::Exit => {
-                        self.state.exit = true;
+                    Action::Exit(confirm_action) => {
+                        self.state.exit = self.worktree.maybe_exit(confirm_action);
                         return Ok(());
                     }
                     Action::Navigation(navigation_action) => self
