@@ -6,7 +6,7 @@ use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
     text::Text,
-    widgets::{Block, Padding, Paragraph, Widget, Wrap},
+    widgets::{Block, Clear, Padding, Paragraph, Widget, Wrap},
 };
 
 pub struct ConfirmDialog {
@@ -67,6 +67,7 @@ impl Widget for &ConfirmDialog {
 
         let area = popup_area(area, height, width + 4);
 
+        Clear.render(area, buf);
         paragraph.render(area, buf);
     }
 }

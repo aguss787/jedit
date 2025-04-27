@@ -106,6 +106,8 @@ impl StatefulWidget for &Preview {
             .render(area, buf);
 
         if y_scroll_size > 0 {
+            let mut scrollbar_area = scrollbar_area;
+            scrollbar_area.height -= 1;
             let scrollbar = scrollbar(ScrollbarOrientation::VerticalRight);
             let mut scrollbar_state =
                 ScrollbarState::new((y_scroll_size + 1).into()).position(state.y_offset.into());
@@ -113,6 +115,8 @@ impl StatefulWidget for &Preview {
         }
 
         if x_scroll_size > 0 {
+            let mut scrollbar_area = scrollbar_area;
+            scrollbar_area.width -= 1;
             let scrollbar = scrollbar(ScrollbarOrientation::HorizontalBottom);
             let mut scrollbar_state =
                 ScrollbarState::new((x_scroll_size + 1).into()).position(state.x_offset.into());

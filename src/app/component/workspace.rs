@@ -277,6 +277,10 @@ impl WorkTree {
             .expect("broken selector");
         self.reindex(index, node_index);
         self.is_unsaved = true;
+
+        if self.preview.is_some() {
+            self.set_preview_to_selected(worktree_state);
+        }
         Ok(())
     }
 
@@ -756,6 +760,33 @@ mod test {
                 .handle_navigation_event(&mut state, NavigationAction::PreviewNavigation(action));
             assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
         }
+    }
+
+    #[test]
+    fn render_preview_update_on_edit_test() {
+        let json = include_str!("example.json");
+        let mut worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkTreeState::default();
+
+        worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
+        worktree.load_selected(&state, "123".as_bytes()).unwrap();
+
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_preview_overlap_test() {
+        let json = include_str!("example.json");
+        let mut worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkTreeState::default();
+
+        worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
+        worktree.load_selected(&state, json.as_bytes()).unwrap();
+        worktree.maybe_exit(ConfirmAction::Request(()));
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.maybe_exit(ConfirmAction::Confirm(false));
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
     fn assert_key_event_to_action(
