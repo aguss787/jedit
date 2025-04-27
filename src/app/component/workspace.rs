@@ -64,7 +64,7 @@ impl WorkTree {
             KeyCode::Char('j') | KeyCode::Down => {
                 actions.push(Action::Navigation(NavigationAction::Down));
             }
-            KeyCode::Char('l') | KeyCode::Enter => {
+            KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ') => {
                 actions.push(Action::Navigation(NavigationAction::Expand));
             }
             KeyCode::Char('h') => {
@@ -324,6 +324,7 @@ mod test {
             (KeyCode::Char('j'), NavigationAction::Down),
             (KeyCode::Enter, NavigationAction::Expand),
             (KeyCode::Char('l'), NavigationAction::Expand),
+            (KeyCode::Char(' '), NavigationAction::Expand),
             (KeyCode::Char('h'), NavigationAction::Close),
         ] {
             assert_key_event_to_action(&worktree, key, vec![Action::Navigation(action)]);
