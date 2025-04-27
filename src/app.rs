@@ -36,7 +36,7 @@ impl CliApp {
             std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
         })?;
 
-        Ok(Self {
+        let mut cli_app = Self {
             worktree: WorkTree::new(file_root),
             worktree_state: WorkTreeState::default(),
             state: GlobalState {
@@ -44,7 +44,13 @@ impl CliApp {
                 loading: None,
                 output_file_name,
             },
-        })
+        };
+
+        cli_app.worktree.handle_navigation_event(
+            &mut cli_app.worktree_state,
+            action::NavigationAction::TogglePreview,
+        );
+        Ok(cli_app)
     }
 
     pub fn run(mut self) -> std::io::Result<()> {

@@ -4,11 +4,12 @@ use std::io::{Read, Write};
 
 use crossterm::event::{Event, KeyCode};
 use ratatui::{
+    layout::{Constraint, Layout},
     prelude::{Buffer, Rect},
     style::{Modifier, Style, palette::tailwind::SLATE},
     text::{Line, Text},
     widgets::{
-        Block, HighlightSpacing, List, ListState, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Block, HighlightSpacing, List, ListState, ScrollbarOrientation, ScrollbarState,
         StatefulWidget, Widget,
     },
 };
@@ -17,13 +18,17 @@ use worktree_node::WorkTreeNode;
 use crate::{
     app::{
         Action, Actions,
-        action::{ConfirmAction, NavigationAction},
+        action::{ConfirmAction, NavigationAction, PreviewNavigation},
     },
     container::node::{Index, Node},
     error::LoadError,
 };
 
-use super::confirm_dialog::ConfirmDialog;
+use super::{
+    confirm_dialog::ConfirmDialog,
+    preview::{Preview, PreviewState},
+    scrollbar::scrollbar,
+};
 
 pub struct WorkTree {
     file_root: Node,
@@ -32,6 +37,7 @@ pub struct WorkTree {
 
     list: List<'static>,
     dialogs: Vec<ConfirmDialog>,
+    preview: Option<Preview>,
 }
 
 impl WorkTree {
@@ -44,6 +50,7 @@ impl WorkTree {
             is_unsaved: false,
             list,
             dialogs: Vec::new(),
+            preview: None,
         }
     }
 
@@ -70,6 +77,9 @@ impl WorkTree {
             KeyCode::Char('h') => {
                 actions.push(Action::Navigation(NavigationAction::Close));
             }
+            KeyCode::Char('p') => {
+                actions.push(Action::Navigation(NavigationAction::TogglePreview));
+            }
             KeyCode::Char('q') => {
                 actions.push(Action::Exit(ConfirmAction::Request(())));
             }
@@ -78,6 +88,18 @@ impl WorkTree {
             }
             KeyCode::Char('w') => {
                 actions.push(Action::Save(ConfirmAction::Request(())));
+            }
+            KeyCode::Char('H') => {
+                actions.push(PreviewNavigation::Left.to_action());
+            }
+            KeyCode::Char('J') => {
+                actions.push(PreviewNavigation::Down.to_action());
+            }
+            KeyCode::Char('K') => {
+                actions.push(PreviewNavigation::Up.to_action());
+            }
+            KeyCode::Char('L') => {
+                actions.push(PreviewNavigation::Right.to_action());
             }
             _ => {}
         }
@@ -88,9 +110,22 @@ impl WorkTree {
         state: &mut WorkTreeState,
         navigation_action: NavigationAction,
     ) {
+        let prev_index = state.list_state.selected();
         match navigation_action {
-            NavigationAction::Up => state.list_state.select_previous(),
-            NavigationAction::Down => state.list_state.select_next(),
+            NavigationAction::Up => {
+                if state.list_state.selected().is_some_and(|index| index > 0) {
+                    state.list_state.select_previous();
+                }
+            }
+            NavigationAction::Down => {
+                if state
+                    .list_state
+                    .selected()
+                    .is_some_and(|index| index + 1 < self.work_tree_root.len())
+                {
+                    state.list_state.select_next();
+                }
+            }
             NavigationAction::Expand => {
                 if let Some(index) = state.list_state.selected() {
                     if self.expand(index) {
@@ -104,6 +139,19 @@ impl WorkTree {
                     self.list = new_list(&self.work_tree_root);
                 }
             }
+            NavigationAction::TogglePreview => {
+                self.toggle_preview(state);
+            }
+            NavigationAction::PreviewNavigation(preview_navigation) => match preview_navigation {
+                PreviewNavigation::Up => state.preview_state.scroll_up(),
+                PreviewNavigation::Down => state.preview_state.scroll_down(),
+                PreviewNavigation::Left => state.preview_state.scroll_left(),
+                PreviewNavigation::Right => state.preview_state.scroll_right(),
+            },
+        }
+
+        if self.preview.is_some() && prev_index != state.list_state.selected() {
+            self.set_preview_to_selected(state);
         }
     }
 
@@ -236,18 +284,38 @@ impl WorkTree {
         self.work_tree_root.reindex(index, node_index);
         self.list = new_list(&self.work_tree_root);
     }
+
+    fn toggle_preview(&mut self, state: &WorkTreeState) {
+        if self.preview.is_some() {
+            self.preview = None;
+            return;
+        }
+
+        self.set_preview_to_selected(state);
+    }
+
+    fn set_preview_to_selected(&mut self, state: &WorkTreeState) {
+        let mut buffer = Vec::new();
+        let _ = self.write_selected(state, &mut buffer);
+        let preview = String::from_utf8(buffer).unwrap_or_default();
+        self.preview = Some(Preview::new((!preview.is_empty()).then_some(preview)))
+    }
 }
 
 #[derive(Debug)]
 pub struct WorkTreeState {
     list_state: ListState,
+    preview_state: PreviewState,
 }
 
 impl Default for WorkTreeState {
     fn default() -> Self {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
-        Self { list_state }
+        Self {
+            list_state,
+            preview_state: PreviewState::default(),
+        }
     }
 }
 
@@ -255,15 +323,31 @@ impl StatefulWidget for &WorkTree {
     type State = WorkTreeState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        if let Some(preview) = &self.preview {
+            let layout = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(2)]);
+            let [tree_area, preview_area] = layout.areas(area);
+
+            self.render_tree(tree_area, buf, state);
+            preview.render(preview_area, buf, &mut state.preview_state);
+        } else {
+            self.render_tree(area, buf, state);
+        }
+
+        for dialog in &self.dialogs {
+            dialog.render(area, buf);
+        }
+    }
+}
+
+impl WorkTree {
+    fn render_tree(&self, area: Rect, buf: &mut Buffer, state: &mut WorkTreeState) {
         let block = Block::bordered().title("Tree");
         let inner_area = block.inner(area);
 
         block.render(area, buf);
         StatefulWidget::render(&self.list, inner_area, buf, &mut state.list_state);
 
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .begin_symbol(Some("↑"))
-            .end_symbol(Some("↓"));
+        let scrollbar = scrollbar(ScrollbarOrientation::VerticalRight);
         StatefulWidget::render(
             scrollbar,
             inner_area,
@@ -271,12 +355,10 @@ impl StatefulWidget for &WorkTree {
             &mut ScrollbarState::new(self.work_tree_root.len())
                 .position(state.list_state.selected().unwrap_or_default()),
         );
-
-        for dialog in &self.dialogs {
-            dialog.render(area, buf);
-        }
     }
 }
+
+impl WorkTree {}
 
 fn new_list(work_tree_node: &WorkTreeNode) -> List<'static> {
     List::new(work_tree_node.as_tree_string())
@@ -326,6 +408,23 @@ mod test {
             (KeyCode::Char('l'), NavigationAction::Expand),
             (KeyCode::Char(' '), NavigationAction::Expand),
             (KeyCode::Char('h'), NavigationAction::Close),
+            (KeyCode::Char('p'), NavigationAction::TogglePreview),
+            (
+                KeyCode::Char('K'),
+                NavigationAction::PreviewNavigation(PreviewNavigation::Up),
+            ),
+            (
+                KeyCode::Char('J'),
+                NavigationAction::PreviewNavigation(PreviewNavigation::Down),
+            ),
+            (
+                KeyCode::Char('H'),
+                NavigationAction::PreviewNavigation(PreviewNavigation::Left),
+            ),
+            (
+                KeyCode::Char('L'),
+                NavigationAction::PreviewNavigation(PreviewNavigation::Right),
+            ),
         ] {
             assert_key_event_to_action(&worktree, key, vec![Action::Navigation(action)]);
         }
@@ -585,6 +684,78 @@ mod test {
             .unwrap();
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state,));
+    }
+
+    #[test]
+    fn render_preview_test() {
+        let json = serde_json::to_string_pretty(&serde_json::json!({
+            "key": "value",
+            "array": [1, 2, ["cat", "dog"]]
+        }))
+        .unwrap();
+        let mut worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkTreeState::default();
+
+        worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.handle_navigation_event(&mut state, NavigationAction::Down);
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn preview_out_of_bound_test() {
+        let json = serde_json::to_string_pretty(&serde_json::json!({
+            "key": "value",
+            "array": [1, 2, ["cat", "dog"]]
+        }))
+        .unwrap();
+        let mut worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkTreeState::default();
+
+        for action in [
+            NavigationAction::TogglePreview,
+            NavigationAction::Up,
+            NavigationAction::Expand,
+            NavigationAction::Down,
+            NavigationAction::Down,
+            NavigationAction::Up,
+        ] {
+            worktree.handle_navigation_event(&mut state, action);
+        }
+
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_preview_scroll_test() {
+        let json = include_str!("example.json");
+        let mut worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkTreeState::default();
+
+        for action in [NavigationAction::TogglePreview, NavigationAction::Expand] {
+            worktree.handle_navigation_event(&mut state, action);
+        }
+
+        for action in [
+            PreviewNavigation::Up,
+            PreviewNavigation::Down,
+            PreviewNavigation::Down,
+            PreviewNavigation::Up,
+            PreviewNavigation::Right,
+            PreviewNavigation::Right,
+            PreviewNavigation::Left,
+        ] {
+            worktree
+                .handle_navigation_event(&mut state, NavigationAction::PreviewNavigation(action));
+            assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+        }
     }
 
     fn assert_key_event_to_action(

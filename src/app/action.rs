@@ -1,5 +1,20 @@
 use std::collections::VecDeque;
 
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum PreviewNavigation {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl PreviewNavigation {
+    pub fn to_action(self) -> Action {
+        Action::Navigation(NavigationAction::PreviewNavigation(self))
+    }
+}
+
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone, Copy))]
 pub enum NavigationAction {
@@ -7,6 +22,8 @@ pub enum NavigationAction {
     Down,
     Expand,
     Close,
+    TogglePreview,
+    PreviewNavigation(PreviewNavigation),
 }
 
 #[derive(Debug)]
