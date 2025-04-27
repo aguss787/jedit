@@ -5,12 +5,13 @@ use crossterm::event::{Event, KeyCode};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
-    text::Text,
+    text::{Line, Text},
     widgets::{Block, Clear, Padding, Paragraph, Widget, Wrap},
 };
 
 pub struct ConfirmDialog {
     message: Text<'static>,
+    title: Option<Line<'static>>,
     response_fn: Box<dyn Fn(bool) -> Action>,
 }
 
@@ -18,8 +19,13 @@ impl ConfirmDialog {
     pub fn new(message: Text<'static>, response_fn: Box<dyn Fn(bool) -> Action>) -> Self {
         Self {
             message,
+            title: None,
             response_fn,
         }
+    }
+
+    pub fn title(&mut self, title: Option<Line<'static>>) {
+        self.title = title;
     }
 
     pub fn handle_event(&self, actions: &mut Actions, event: Event) {
@@ -44,10 +50,14 @@ impl Widget for &ConfirmDialog {
     where
         Self: Sized,
     {
-        let block = Block::bordered()
+        let mut block = Block::bordered()
             .padding(Padding::symmetric(1, 1))
             .title_bottom("[Y]es / [N]o")
             .title_alignment(Alignment::Center);
+
+        if let Some(title) = self.title.clone() {
+            block = block.title(title);
+        }
 
         let paragraph = Paragraph::new(self.message.clone())
             .wrap(Wrap { trim: true })
@@ -144,6 +154,20 @@ mod test {
             message,
             Box::new(ConfirmAction::action_confirmer(Action::Save)),
         );
+
+        assert_snapshot!(render_to_string(&dialog));
+    }
+
+    #[test]
+    fn render_title_test() {
+        let mut message = Text::default();
+        message.push_line(Line::from("Broken IO pipe"));
+        message.push_line(Line::from("continue?"));
+        let mut dialog = ConfirmDialog::new(
+            message,
+            Box::new(ConfirmAction::action_confirmer(Action::Save)),
+        );
+        dialog.title(Some(Line::from("Error")));
 
         assert_snapshot!(render_to_string(&dialog));
     }

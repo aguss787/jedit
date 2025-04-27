@@ -6,7 +6,7 @@ use std::{fs::File, io::stdout, process::Command, time::Duration};
 use action::{Action, Actions, ConfirmAction};
 use component::{
     loading::Loading,
-    workspace::{WorkTree, WorkTreeState},
+    workspace::{WorkSpace, WorkTreeState},
 };
 use crossterm::{
     ExecutableCommand,
@@ -26,7 +26,7 @@ struct GlobalState {
 pub struct CliApp {
     state: GlobalState,
     worktree_state: WorkTreeState,
-    worktree: WorkTree,
+    worktree: WorkSpace,
 }
 
 impl CliApp {
@@ -37,7 +37,7 @@ impl CliApp {
         })?;
 
         let mut cli_app = Self {
-            worktree: WorkTree::new(file_root),
+            worktree: WorkSpace::new(file_root),
             worktree_state: WorkTreeState::default(),
             state: GlobalState {
                 exit: false,
