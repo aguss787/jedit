@@ -1,7 +1,8 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Rect},
-    text::{Line, Text},
+    style::{Style, Stylize},
+    text::{Line, Span, Text},
     widgets::{
         Block, Padding, Paragraph, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget,
     },
@@ -83,7 +84,15 @@ impl StatefulWidget for &Preview {
 
         let scrollbar_area = block.inner(area);
         let block = block.padding(Padding::new(0, 2, 0, 2));
-        let content_area = block.inner(area);
+        let mut content_area = block.inner(area);
+        block.render(area, buf);
+
+        let line_number_area = content_area;
+        let n_digits = content.n_lines.to_string().len().max(3);
+
+        let content_area_shift: u16 = (n_digits + 1).try_into().unwrap_or_default();
+        content_area.x += content_area_shift;
+        content_area.width -= content_area_shift;
 
         let y_scroll_size = content
             .n_lines
@@ -99,11 +108,22 @@ impl StatefulWidget for &Preview {
             .saturating_sub(content_area.width);
         state.x_offset = state.x_offset.min(x_scroll_size);
 
+        (0..content_area.height)
+            .map(|i| state.y_offset + i + 1)
+            .take_while(|i| {
+                u16::try_from(content.n_lines)
+                    .ok()
+                    .is_none_or(|n_lines| *i <= n_lines)
+            })
+            .map(|i| Span::from(number_format(i, n_digits)).style(Style::new().cyan()))
+            .collect::<Text<'_>>()
+            .render(line_number_area, buf);
+
         let lines = content.text.lines().map(Line::from).collect::<Text>();
+
         Paragraph::new(lines)
-            .block(block)
             .scroll((state.y_offset, state.x_offset))
-            .render(area, buf);
+            .render(content_area, buf);
 
         if y_scroll_size > 0 {
             let mut scrollbar_area = scrollbar_area;
@@ -123,6 +143,14 @@ impl StatefulWidget for &Preview {
             StatefulWidget::render(scrollbar, scrollbar_area, buf, &mut scrollbar_state);
         }
     }
+}
+
+fn number_format(index: u16, n_digits: usize) -> String {
+    let num = index.to_string();
+    (0..n_digits.saturating_sub(num.len()))
+        .map(|_| ' ')
+        .chain(num.chars())
+        .collect()
 }
 
 struct Content {

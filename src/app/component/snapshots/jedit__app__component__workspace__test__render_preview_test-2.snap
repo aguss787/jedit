@@ -3,7 +3,7 @@ source: src/app/component/workspace.rs
 expression: "stateful_render_to_string(&worktree, &mut state)"
 ---
 "┌Tree─────────────────────┐┌Preview────────────────────────────────────────────┐"
-"│  root                  ↑││"value"                                            │"
+"│  root                  ↑││  1 "value"                                        │"
 "│> --key                 ║││                                                   │"
 "│  --array               █││                                                   │"
 "│                        █││                                                   │"
