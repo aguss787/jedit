@@ -114,7 +114,7 @@ impl WorkTree {
     ) -> std::io::Result<()> {
         match confirm_action {
             ConfirmAction::Request(()) => self.dialogs.push(ConfirmDialog::new(
-                Text::from("Write file?").centered(),
+                Text::from(Line::from("Write file?").centered()),
                 Box::new(ConfirmAction::action_confirmer(Action::Save)),
             )),
             ConfirmAction::Confirm(ok) => {
@@ -569,6 +569,20 @@ mod test {
             .load_selected(&state, String::from("456").as_bytes())
             .unwrap();
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
+
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state,));
+    }
+
+    #[test]
+    fn render_save_dialog_test() {
+        let json = String::from("123");
+        let mut worktree = WorkTree::new(Node::load(json.as_bytes()).unwrap());
+
+        let mut state = WorkTreeState::default();
+        let mut buffer = Vec::new();
+        worktree
+            .handle_save_action(ConfirmAction::Request(()), || &mut buffer)
+            .unwrap();
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state,));
     }
