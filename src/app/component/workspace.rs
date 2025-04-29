@@ -1,6 +1,6 @@
 mod worktree_node;
 
-use std::io::{Read, Write};
+use std::io::Write;
 
 use crossterm::event::{Event, KeyCode};
 use ratatui::{
@@ -15,17 +15,22 @@ use ratatui::{
 };
 use worktree_node::WorkTreeNode;
 
+#[cfg(test)]
+use crate::error::LoadError;
+#[cfg(test)]
+use std::io::Read;
+
 use crate::{
     app::{
         Action, Actions,
         action::{ConfirmAction, NavigationAction, PreviewNavigation},
     },
     container::node::{Index, Node},
-    error::LoadError,
 };
 
 use super::{
     confirm_dialog::ConfirmDialog,
+    loading::Loading,
     preview::{Preview, PreviewState},
     scrollbar::scrollbar,
 };
@@ -33,11 +38,12 @@ use super::{
 pub struct WorkSpace {
     file_root: Node,
     work_tree_root: WorkTreeNode,
-    is_unsaved: bool,
+    edit_cntr: i64,
 
     list: List<'static>,
     dialogs: Vec<ConfirmDialog>,
     preview: Option<Preview>,
+    loading: Option<Loading>,
 }
 
 impl WorkSpace {
@@ -47,14 +53,23 @@ impl WorkSpace {
         Self {
             file_root,
             work_tree_root,
-            is_unsaved: false,
+            edit_cntr: 0,
             list,
             dialogs: Vec::new(),
             preview: None,
+            loading: None,
         }
     }
 
+    pub fn decrease_edit_cntr(&mut self) {
+        self.edit_cntr -= 1;
+    }
+
     pub fn handle_event(&self, actions: &mut Actions, event: Event) {
+        if self.loading.is_some() {
+            return;
+        }
+
         if let Some(dialog) = self.dialogs.first() {
             dialog.handle_event(actions, event);
             return;
@@ -155,6 +170,14 @@ impl WorkSpace {
         }
     }
 
+    pub fn set_loading(&mut self, is_loading: bool) {
+        if is_loading && self.loading.is_none() {
+            self.loading = Some(Loading::new());
+        } else if !is_loading {
+            self.loading = None;
+        }
+    }
+
     pub fn handle_save_action<F: FnOnce() -> W, W: Write>(
         &mut self,
         confirm_action: ConfirmAction<()>,
@@ -200,14 +223,14 @@ impl WorkSpace {
     pub fn maybe_exit(&mut self, confirm_action: ConfirmAction<()>) -> bool {
         match confirm_action {
             ConfirmAction::Request(()) => {
-                if self.is_unsaved {
+                if self.edit_cntr != 0 {
                     self.dialogs.push(ConfirmDialog::new(
                         Text::from(vec![Line::from("Discard unsaved changes?").centered()]),
                         Box::new(ConfirmAction::action_confirmer(Action::Exit)),
                     ));
                 }
 
-                !self.is_unsaved
+                self.edit_cntr == 0
             }
             ConfirmAction::Confirm(ok) => {
                 self.dialogs.pop();
@@ -244,7 +267,7 @@ impl WorkSpace {
     fn save(&mut self, writer: impl Write) -> Result<(), std::io::Error> {
         let res = self.write_on_index(writer, 0);
         if res.is_ok() {
-            self.is_unsaved = false;
+            self.edit_cntr = 0;
         }
         res
     }
@@ -261,6 +284,7 @@ impl WorkSpace {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn load_selected(
         &mut self,
         worktree_state: &WorkTreeState,
@@ -277,12 +301,30 @@ impl WorkSpace {
             .replace(&selector, new_node)
             .expect("broken selector");
         self.reindex(index, node_index);
-        self.is_unsaved = true;
+        self.edit_cntr += 1;
 
         if self.preview.is_some() {
             self.set_preview_to_selected(worktree_state);
         }
         Ok(())
+    }
+
+    pub fn replace_selected(&mut self, worktree_state: &WorkTreeState, new_node: Node) {
+        let Some(index) = worktree_state.list_state.selected() else {
+            return;
+        };
+        let selector = self.work_tree_root.selector(index);
+
+        let node_index = new_node.as_index();
+        self.file_root
+            .replace(&selector, new_node)
+            .expect("broken selector");
+        self.reindex(index, node_index);
+        self.edit_cntr += 1;
+
+        if self.preview.is_some() {
+            self.set_preview_to_selected(worktree_state);
+        }
     }
 
     fn reindex(&mut self, index: usize, node_index: Index) {
@@ -340,6 +382,10 @@ impl StatefulWidget for &WorkSpace {
 
         for dialog in &self.dialogs {
             dialog.render(area, buf);
+        }
+
+        if let Some(loading) = &self.loading {
+            loading.render(area, buf);
         }
     }
 }
@@ -810,6 +856,6 @@ mod test {
     fn assert_event_to_action(worktree: &WorkSpace, event: Event, expected_actions: Vec<Action>) {
         let mut actions = Actions::new();
         worktree.handle_event(&mut actions, event);
-        assert_eq!(actions.to_vec(), expected_actions)
+        assert_eq!(actions.into_vec(), expected_actions)
     }
 }

@@ -1,5 +1,9 @@
 use std::collections::VecDeque;
 
+use crate::container::node::Node;
+
+use super::job::Job;
+
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum PreviewNavigation {
@@ -39,14 +43,17 @@ impl<T> ConfirmAction<T> {
     }
 }
 
+#[must_use]
 #[derive(Debug)]
-#[cfg_attr(test, derive(PartialEq, Clone))]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum Action {
     Exit(ConfirmAction<()>),
     Navigation(NavigationAction),
     Edit,
     EditError(ConfirmAction<String>),
     Save(ConfirmAction<()>),
+    Load(Node),
+    RegisterJob(Job),
 }
 
 pub struct Actions(VecDeque<Action>);
@@ -65,8 +72,8 @@ impl Actions {
     }
 
     #[cfg(test)]
-    pub fn to_vec(&self) -> Vec<Action> {
-        self.0.iter().cloned().collect()
+    pub fn into_vec(self) -> Vec<Action> {
+        self.0.into_iter().collect()
     }
 }
 

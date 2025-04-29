@@ -5,7 +5,7 @@ use ratatui::{
     layout::Rect,
     prelude::Buffer,
     text::Text,
-    widgets::{Block, Padding, Widget},
+    widgets::{Block, Clear, Padding, Widget},
 };
 
 pub struct Loading(Instant);
@@ -38,6 +38,8 @@ impl Widget for &Loading {
         let block = Block::bordered().padding(Padding::symmetric(1, 1));
         let area = popup_area(area, 5, 14);
         let inner_area = block.inner(area);
+
+        Clear.render(inner_area, buf);
 
         block.render(area, buf);
         self.loading_text().render(inner_area, buf);

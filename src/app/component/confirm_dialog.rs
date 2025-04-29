@@ -128,7 +128,7 @@ mod test {
                     state: KeyEventState::NONE,
                 }),
             );
-            assert_eq!(actions.to_vec(), vec![action])
+            assert_eq!(actions.into_vec(), vec![action])
         }
     }
 

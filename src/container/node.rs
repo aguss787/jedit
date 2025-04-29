@@ -34,6 +34,7 @@ pub enum Index {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct Node {
     n_lines: usize,
     n_bytes: usize,
@@ -41,6 +42,7 @@ pub struct Node {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq))]
 enum Number {
     Int(i64),
     Float(f64),
@@ -56,6 +58,7 @@ impl Display for Number {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 enum Kind {
     Null,
     Bool(bool),
@@ -98,7 +101,7 @@ impl Node {
 }
 
 impl Node {
-    fn null() -> Self {
+    pub fn null() -> Self {
         Self {
             n_lines: 1,
             n_bytes: 4,

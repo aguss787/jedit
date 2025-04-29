@@ -1,25 +1,23 @@
 mod action;
 mod component;
+mod job;
 
 use std::{fs::File, io::stdout, process::Command, time::Duration};
 
 use action::{Action, Actions, ConfirmAction};
-use component::{
-    loading::Loading,
-    workspace::{WorkSpace, WorkTreeState},
-};
+use component::workspace::{WorkSpace, WorkTreeState};
 use crossterm::{
     ExecutableCommand,
     event::{self, Event, KeyCode},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use job::Job;
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::{container::node::Node, error::LoadError};
 
 struct GlobalState {
     exit: bool,
-    loading: Option<Loading>,
     output_file_name: String,
 }
 
@@ -27,24 +25,30 @@ pub struct CliApp {
     state: GlobalState,
     worktree_state: WorkTreeState,
     worktree: WorkSpace,
+    jobs: Vec<Job>,
 }
 
 impl CliApp {
     pub fn new(input_file_name: String, output_file_name: String) -> std::io::Result<Self> {
-        let file = File::open(&input_file_name)?;
-        let file_root = Node::load(file).map_err(|error| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
-        })?;
+        let initial_load_job = Job::new(move || {
+            let file = File::open(&input_file_name)?;
+            let file_root = Node::load(file).map_err(|error| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+            })?;
+
+            Ok(Action::Load(file_root))
+        });
 
         let mut cli_app = Self {
-            worktree: WorkSpace::new(file_root),
+            worktree: WorkSpace::new(Node::null()),
             worktree_state: WorkTreeState::default(),
             state: GlobalState {
                 exit: false,
-                loading: None,
                 output_file_name,
             },
+            jobs: vec![initial_load_job],
         };
+        cli_app.worktree.decrease_edit_cntr();
 
         cli_app.worktree.handle_navigation_event(
             &mut cli_app.worktree_state,
@@ -66,13 +70,10 @@ impl CliApp {
 
     fn draw(&mut self, frame: &mut Frame) {
         frame.render_stateful_widget(&self.worktree, frame.area(), &mut self.worktree_state);
-
-        if let Some(loading) = &self.state.loading {
-            frame.render_widget(loading, frame.area());
-        }
     }
 
     fn handle_event(&mut self, terminal: &mut Terminal) -> std::io::Result<()> {
+        let mut actions = Actions::new();
         if event::poll(FRAME_TIME)? {
             let event = event::read()?;
             if global_exit_handler(&event) {
@@ -80,65 +81,88 @@ impl CliApp {
                 return Ok(());
             }
 
-            let mut actions = Actions::new();
             self.worktree.handle_event(&mut actions, event);
+        }
 
-            while let Some(action) = actions.next() {
-                match action {
-                    Action::Exit(confirm_action) => {
-                        self.state.exit = self.worktree.maybe_exit(confirm_action);
-                        return Ok(());
-                    }
-                    Action::Navigation(navigation_action) => self
+        let mut jobs = Vec::new();
+        std::mem::swap(&mut jobs, &mut self.jobs);
+        jobs.into_iter()
+            .filter_map(|job| {
+                if job.is_done() {
+                    Some(job.action())
+                } else {
+                    self.jobs.push(job);
+                    None
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .for_each(|action| actions.push(action));
+
+        while let Some(action) = actions.next() {
+            match action {
+                Action::Exit(confirm_action) => {
+                    self.state.exit = self.worktree.maybe_exit(confirm_action);
+                    return Ok(());
+                }
+                Action::Navigation(navigation_action) => self
+                    .worktree
+                    .handle_navigation_event(&mut self.worktree_state, navigation_action),
+                Action::Edit => {
+                    let mut file = File::create(EDITOR_BUFFER)?;
+                    if !self
                         .worktree
-                        .handle_navigation_event(&mut self.worktree_state, navigation_action),
-                    Action::Edit => {
-                        let mut file = File::create(EDITOR_BUFFER)?;
-                        if !self
-                            .worktree
-                            .write_selected(&self.worktree_state, &mut file)?
-                        {
-                            continue;
-                        };
-                        drop(file);
-                        self.edit_in_editor_and_load_back(terminal, &mut actions)?;
+                        .write_selected(&self.worktree_state, &mut file)?
+                    {
+                        continue;
+                    };
+                    drop(file);
+                    self.edit_in_editor(terminal, &mut actions)?;
+                }
+                Action::Save(confirm_action) => {
+                    let output_file = File::create(&self.state.output_file_name)?;
+                    self.worktree
+                        .handle_save_action(confirm_action, move || output_file)?;
+                }
+                Action::EditError(confirm_action) => {
+                    if self.worktree.handle_edit_error_action(confirm_action) {
+                        self.edit_in_editor(terminal, &mut actions)?;
                     }
-                    Action::Save(confirm_action) => {
-                        let output_file = File::create(&self.state.output_file_name)?;
-                        self.worktree
-                            .handle_save_action(confirm_action, move || output_file)?;
-                    }
-                    Action::EditError(confirm_action) => {
-                        if self.worktree.handle_edit_error_action(confirm_action) {
-                            self.edit_in_editor_and_load_back(terminal, &mut actions)?;
-                        }
-                    }
+                }
+                Action::Load(node) => {
+                    self.worktree.replace_selected(&self.worktree_state, node);
+                }
+                Action::RegisterJob(job) => {
+                    self.jobs.push(job);
                 }
             }
         }
+
+        self.worktree.set_loading(!self.jobs.is_empty());
         Ok(())
     }
 
-    fn edit_in_editor_and_load_back(
+    fn edit_in_editor(
         &mut self,
         terminal: &mut Terminal,
         actions: &mut Actions,
     ) -> Result<(), std::io::Error> {
         terminal.run_editor(EDITOR_BUFFER)?;
-        let mut file = File::open(EDITOR_BUFFER)?;
-        let load_result = self.worktree.load_selected(&self.worktree_state, &mut file);
-        match load_result {
-            Err(LoadError::IO(error)) => {
-                return Err(error);
+        actions.push(Action::RegisterJob(Job::new(|| {
+            let file = File::open(EDITOR_BUFFER)?;
+
+            match Node::load(file) {
+                Err(LoadError::IO(error)) => Err(error),
+                Err(LoadError::SerdeJson(error)) => {
+                    Ok(Action::EditError(ConfirmAction::Request(error.to_string())))
+                }
+                Err(LoadError::DeserializationError(error)) => {
+                    Ok(Action::EditError(ConfirmAction::Request(error.to_string())))
+                }
+                Ok(node) => Ok(Action::Load(node)),
             }
-            Err(LoadError::SerdeJson(error)) => {
-                actions.push(Action::EditError(ConfirmAction::Request(error.to_string())));
-            }
-            Err(LoadError::DeserializationError(error)) => {
-                actions.push(Action::EditError(ConfirmAction::Request(error.to_string())));
-            }
-            Ok(_) => {}
-        };
+        })));
+
         Ok(())
     }
 }
