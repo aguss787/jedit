@@ -247,7 +247,7 @@ impl WorkSpace {
             .expect("broken selector")
             .as_index();
         let is_terminal = matches!(node_index, Index::Terminal);
-        self.reindex(index, node_index);
+        self.reindex(index, node_index, true);
         !is_terminal
     }
 
@@ -300,7 +300,7 @@ impl WorkSpace {
         self.file_root
             .replace(&selector, new_node)
             .expect("broken selector");
-        self.reindex(index, node_index);
+        self.reindex(index, node_index, false);
         self.edit_cntr += 1;
 
         if self.preview.is_some() {
@@ -319,7 +319,7 @@ impl WorkSpace {
         self.file_root
             .replace(&selector, new_node)
             .expect("broken selector");
-        self.reindex(index, node_index);
+        self.reindex(index, node_index, false);
         self.edit_cntr += 1;
 
         if self.preview.is_some() {
@@ -327,8 +327,8 @@ impl WorkSpace {
         }
     }
 
-    fn reindex(&mut self, index: usize, node_index: Index) {
-        self.work_tree_root.reindex(index, node_index);
+    fn reindex(&mut self, index: usize, node_index: Index, force: bool) {
+        self.work_tree_root.reindex(index, node_index, force);
         self.list = new_list(&self.work_tree_root);
     }
 

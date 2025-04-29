@@ -44,7 +44,7 @@ impl WorkTreeNode {
         res
     }
 
-    pub fn reindex(&mut self, index: usize, node_index: Index) {
+    pub fn reindex(&mut self, index: usize, node_index: Index, force: bool) {
         let (len, child) = match node_index {
             Index::Terminal => (1, Vec::new()),
             Index::Object(items) => (
@@ -57,18 +57,22 @@ impl WorkTreeNode {
             ),
         };
 
-        let old_len = RefCell::new(1);
+        let old_len = RefCell::new(None);
 
         self.traverse_node_mut(
             index,
             &mut |_| {},
             &mut |node: &mut WorkTreeNode| {
-                node.len -= *old_len.borrow();
-                node.len += len;
+                if let Some(old_len) = *old_len.borrow() {
+                    node.len -= old_len;
+                    node.len += len;
+                }
             },
             |node: &mut WorkTreeNode| {
-                *old_len.borrow_mut() = node.len;
-                node.child = Some(child);
+                if node.child.is_some() || force {
+                    *old_len.borrow_mut() = Some(node.len);
+                    node.child = Some(child);
+                }
             },
         );
     }
@@ -224,13 +228,15 @@ mod test {
                 String::from("c"),
                 String::from("d"),
             ]),
+            true,
         );
         node.reindex(
             1,
             Index::Object(vec![String::from("aa"), String::from("ab")]),
+            true,
         );
-        node.reindex(4, Index::Array(3));
-        node.reindex(8, Index::Array(5));
+        node.reindex(4, Index::Array(3), true);
+        node.reindex(8, Index::Array(5), true);
         node.close(8);
 
         assert_eq!(
@@ -261,12 +267,14 @@ mod test {
                 String::from("c"),
                 String::from("d"),
             ]),
+            true,
         );
         node.reindex(
             1,
             Index::Object(vec![String::from("aa"), String::from("ab")]),
+            true,
         );
-        node.reindex(4, Index::Array(3));
+        node.reindex(4, Index::Array(3), true);
 
         assert_eq!(node.len(), 10);
         assert_eq!(node.selector(0), Vec::<&str>::new());
