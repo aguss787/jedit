@@ -1,9 +1,11 @@
 use std::{fmt::Display, ops::Deref};
 
 use indexmap::IndexMap;
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use serde::Serialize;
 
 use super::INDENT;
-use crate::error::{DeserializationError, DumpError, IndexingError, LoadError, SerializationError};
+use crate::error::{DeserializationError, DumpError, IndexingError, LoadError};
 
 struct Selector<'a, T> {
     keys: &'a [T],
@@ -75,8 +77,7 @@ impl Node {
     }
 
     pub fn to_string_pretty(&self) -> Result<String, DumpError> {
-        let value = self.to_serde_json()?;
-        sonic_rs::to_string_pretty(&value).map_err(Into::into)
+        sonic_rs::to_string_pretty(self).map_err(Into::into)
     }
 
     pub fn subtree<T: Deref<Target = str>>(&self, selector: &[T]) -> Result<&Node, IndexingError> {
@@ -149,12 +150,13 @@ impl Node {
         }
 
         let nodes: Vec<Self> = values
-            .into_iter()
+            .into_par_iter()
             .map(Self::from_serde_json)
             .collect::<Result<_, _>>()?;
+
         Ok(Self {
-            n_lines: nodes.iter().map(|node| node.n_lines).sum::<usize>() + 2,
-            n_bytes: nodes.iter().map(Self::indented_n_bytes).sum::<usize>()
+            n_lines: nodes.par_iter().map(|node| node.n_lines).sum::<usize>() + 2,
+            n_bytes: nodes.par_iter().map(Self::indented_n_bytes).sum::<usize>()
                 + nodes.len()
                 + nodes.len().saturating_sub(1)
                 + 3,
@@ -172,13 +174,13 @@ impl Node {
         }
 
         let nodes: IndexMap<String, Self> = values
-            .into_iter()
+            .into_par_iter()
             .map(|(key, value)| Ok((key, Self::from_serde_json(value)?)))
             .collect::<Result<_, _>>()?;
         Ok(Self {
-            n_lines: nodes.values().map(|node| node.n_lines).sum::<usize>() + 2,
+            n_lines: nodes.par_values().map(|node| node.n_lines).sum::<usize>() + 2,
             n_bytes: nodes
-                .iter()
+                .par_iter()
                 .map(|(key, node)| 4 + key.len() + node.indented_n_bytes())
                 .sum::<usize>()
                 + nodes.len()
@@ -248,33 +250,6 @@ impl Node {
         }
     }
 
-    fn to_serde_json(&self) -> Result<serde_json::Value, SerializationError> {
-        let res = match self.data {
-            Kind::Null => serde_json::Value::Null,
-            Kind::Bool(value) => serde_json::Value::Bool(value),
-            Kind::Number(number) => serde_json::Value::Number(match number {
-                Number::Int(number) => number.into(),
-                Number::Float(number) => serde_json::Number::from_f64(number)
-                    .ok_or(SerializationError::InvalidNumber(number))?,
-            }),
-            Kind::String(ref value) => serde_json::Value::String(value.clone()),
-            Kind::Array(ref nodes) => serde_json::Value::Array(
-                nodes
-                    .iter()
-                    .map(Self::to_serde_json)
-                    .collect::<Result<_, _>>()?,
-            ),
-            Kind::Object(ref nodes) => serde_json::Value::Object(
-                nodes
-                    .iter()
-                    .map(|(key, value)| Ok((key.clone(), value.to_serde_json()?)))
-                    .collect::<Result<_, _>>()?,
-            ),
-        };
-
-        Ok(res)
-    }
-
     fn from_serde_json(value: serde_json::Value) -> Result<Self, DeserializationError> {
         let res = match value {
             serde_json::Value::Null => Self::null(),
@@ -285,6 +260,43 @@ impl Node {
             serde_json::Value::Object(map) => Self::object(map.into_iter().collect())?,
         };
         Ok(res)
+    }
+}
+
+impl Serialize for Node {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.data.serialize(serializer)
+    }
+}
+
+impl Serialize for Kind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Kind::Null => serde_json::Value::Null.serialize(serializer),
+            Kind::Bool(value) => value.serialize(serializer),
+            Kind::Number(number) => number.serialize(serializer),
+            Kind::String(value) => value.serialize(serializer),
+            Kind::Array(nodes) => nodes.serialize(serializer),
+            Kind::Object(index_map) => index_map.serialize(serializer),
+        }
+    }
+}
+
+impl Serialize for Number {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Number::Int(value) => value.serialize(serializer),
+            Number::Float(value) => value.serialize(serializer),
+        }
     }
 }
 
@@ -358,10 +370,7 @@ mod test {
             }
         });
 
-        let from_node = Node::from_serde_json(json_value.clone())
-            .unwrap()
-            .to_serde_json()
-            .unwrap();
+        let from_node = Node::from_serde_json(json_value.clone()).unwrap();
         assert_eq!(
             sonic_rs::to_string(&from_node).unwrap(),
             sonic_rs::to_string(&json_value).unwrap(),
@@ -488,10 +497,13 @@ mod test {
         let new_node = Node::from_serde_json(json!(["cat", "dog"])).unwrap();
         let replaced_node = node.replace(&["nested", "key"], new_node).unwrap();
 
-        assert_eq!(replaced_node.to_serde_json().unwrap(), json!("value"));
         assert_eq!(
-            node.to_serde_json().unwrap(),
-            json!({
+            replaced_node,
+            Node::from_serde_json(json!("value")).unwrap()
+        );
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
                 "a": "x",
                 "b": "x",
                 "nested": {
@@ -505,7 +517,8 @@ mod test {
                     2,
                     3
                 ]
-            })
+            }))
+            .unwrap()
         );
 
         node.assert_all_meta();
