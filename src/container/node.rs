@@ -27,9 +27,32 @@ impl<'a, T: Deref<Target = str>> Selector<'a, T> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct NodeMeta {
+    pub n_lines: usize,
+    pub n_bytes: usize,
+}
+
+impl NodeMeta {
+    pub fn null() -> Self {
+        NodeMeta {
+            n_lines: 1,
+            n_bytes: 4,
+        }
+    }
+}
+
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
-pub enum Index {
+pub struct Index {
+    pub meta: NodeMeta,
+    pub kind: IndexKind,
+}
+
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum IndexKind {
     Terminal,
     Object(Vec<String>),
     Array(usize),
@@ -93,11 +116,16 @@ impl Node {
     }
 
     pub fn as_index(&self) -> Index {
-        match &self.data {
-            Kind::Array(nodes) => Index::Array(nodes.len()),
-            Kind::Object(index_map) => Index::Object(index_map.keys().cloned().collect()),
-            Kind::Null | Kind::Bool(_) | Kind::Number(_) | Kind::String(_) => Index::Terminal,
-        }
+        let meta = NodeMeta {
+            n_lines: self.n_lines,
+            n_bytes: self.n_bytes,
+        };
+        let kind = match &self.data {
+            Kind::Array(nodes) => IndexKind::Array(nodes.len()),
+            Kind::Object(index_map) => IndexKind::Object(index_map.keys().cloned().collect()),
+            Kind::Null | Kind::Bool(_) | Kind::Number(_) | Kind::String(_) => IndexKind::Terminal,
+        };
+        Index { meta, kind }
     }
 }
 
@@ -438,36 +466,75 @@ mod test {
         let node = Node::load(RAW_JSON.as_bytes()).unwrap();
         assert_eq!(
             node.subtree::<&str>(&[]).unwrap().as_index(),
-            Index::Object(vec![
-                String::from("string"),
-                String::from("int"),
-                String::from("float"),
-                String::from("bool"),
-                String::from("other_bool"),
-                String::from("null"),
-                String::from("array"),
-                String::from("nested_object"),
-            ])
+            Index {
+                meta: NodeMeta {
+                    n_lines: 16,
+                    n_bytes: 199,
+                },
+                kind: IndexKind::Object(vec![
+                    String::from("string"),
+                    String::from("int"),
+                    String::from("float"),
+                    String::from("bool"),
+                    String::from("other_bool"),
+                    String::from("null"),
+                    String::from("array"),
+                    String::from("nested_object"),
+                ])
+            }
         );
 
         assert_eq!(
             node.subtree(&["array"]).unwrap().as_index(),
-            Index::Array(3)
+            Index {
+                meta: NodeMeta {
+                    n_lines: 5,
+                    n_bytes: 19,
+                },
+                kind: IndexKind::Array(3)
+            }
         );
         assert_eq!(
             node.subtree(&["array", "0"]).unwrap().as_index(),
-            Index::Terminal
+            Index {
+                meta: NodeMeta {
+                    n_lines: 1,
+                    n_bytes: 1,
+                },
+                kind: IndexKind::Terminal
+            }
         );
         assert_eq!(
             node.subtree(&["nested_object"]).unwrap().as_index(),
-            Index::Object(vec![String::from("key")])
+            Index {
+                meta: NodeMeta {
+                    n_lines: 3,
+                    n_bytes: 20,
+                },
+                kind: IndexKind::Object(vec![String::from("key")])
+            }
         );
         assert_eq!(
             node.subtree(&["nested_object", "key"]).unwrap().as_index(),
-            Index::Terminal
+            Index {
+                meta: NodeMeta {
+                    n_lines: 1,
+                    n_bytes: 7,
+                },
+                kind: IndexKind::Terminal
+            }
         );
 
-        assert_eq!(node.subtree(&["int"]).unwrap().as_index(), Index::Terminal);
+        assert_eq!(
+            node.subtree(&["int"]).unwrap().as_index(),
+            Index {
+                meta: NodeMeta {
+                    n_lines: 1,
+                    n_bytes: 3
+                },
+                kind: IndexKind::Terminal
+            }
+        );
         assert_eq!(
             node.subtree(&["int", "2"]).unwrap_err(),
             IndexingError::NotIndexable

@@ -1,19 +1,30 @@
 use std::{cell::RefCell, slice::Iter};
 
-use crate::container::node::Index;
+use crate::container::node::{Index, IndexKind, NodeMeta};
 
 #[derive(Debug)]
 pub struct WorkTreeNode {
     name: String,
     len: usize,
+    meta: Option<NodeMeta>,
     child: Option<Vec<WorkTreeNode>>,
 }
 
 impl WorkTreeNode {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: String, meta: Option<NodeMeta>) -> Self {
         Self {
             name,
             len: 1,
+            meta,
+            child: None,
+        }
+    }
+
+    pub fn new_empty(name: String) -> Self {
+        Self {
+            name,
+            len: 1,
+            meta: None,
             child: None,
         }
     }
@@ -45,15 +56,17 @@ impl WorkTreeNode {
     }
 
     pub fn reindex(&mut self, index: usize, node_index: Index, force: bool) {
-        let (len, child) = match node_index {
-            Index::Terminal => (1, Vec::new()),
-            Index::Object(items) => (
+        let (len, child) = match node_index.kind {
+            IndexKind::Terminal => (1, Vec::new()),
+            IndexKind::Object(items) => (
                 items.len() + 1,
-                items.into_iter().map(WorkTreeNode::new).collect(),
+                items.into_iter().map(WorkTreeNode::new_empty).collect(),
             ),
-            Index::Array(n) => (
+            IndexKind::Array(n) => (
                 n + 1,
-                (0..n).map(|i| WorkTreeNode::new(i.to_string())).collect(),
+                (0..n)
+                    .map(|i| WorkTreeNode::new_empty(i.to_string()))
+                    .collect(),
             ),
         };
 
@@ -69,6 +82,7 @@ impl WorkTreeNode {
                 }
             },
             |node: &mut WorkTreeNode| {
+                node.meta = Some(node_index.meta);
                 if node.child.is_some() || force {
                     *old_len.borrow_mut() = Some(node.len);
                     node.child = Some(child);
@@ -92,22 +106,27 @@ impl WorkTreeNode {
         );
     }
 
-    fn traverse_node<'a, B, A, F>(
+    pub fn meta(&self, index: usize) -> Option<NodeMeta> {
+        self.traverse_node(index, &mut |_| {}, &mut |_| {}, |node| node.meta)
+    }
+
+    fn traverse_node<'a, B, A, F, R>(
         &'a self,
         mut index: usize,
         before_visit_hook: &mut B,
         after_visit_hook: &mut A,
         on_found_hook: F,
-    ) where
+    ) -> R
+    where
         B: FnMut(&'a WorkTreeNode),
         A: FnMut(&'a WorkTreeNode),
-        F: FnOnce(&'a WorkTreeNode),
+        F: FnOnce(&'a WorkTreeNode) -> R,
     {
         before_visit_hook(self);
         if index == 0 {
-            on_found_hook(self);
+            let res = on_found_hook(self);
             after_visit_hook(self);
-            return;
+            return res;
         }
 
         if index >= self.len {
@@ -118,9 +137,10 @@ impl WorkTreeNode {
         let child = self.child.as_deref().into_iter().flatten();
         for child in child {
             if index < child.len {
-                child.traverse_node(index, before_visit_hook, after_visit_hook, on_found_hook);
+                let res =
+                    child.traverse_node(index, before_visit_hook, after_visit_hook, on_found_hook);
                 after_visit_hook(self);
-                return;
+                return res;
             }
 
             index -= child.len;
@@ -219,24 +239,44 @@ mod test {
 
     #[test]
     fn work_tree_formatting_test() {
-        let mut node = WorkTreeNode::new(String::from("root"));
+        let mut node = WorkTreeNode::new_empty(String::from("root"));
         node.reindex(
             0,
-            Index::Object(vec![
-                String::from("a"),
-                String::from("b"),
-                String::from("c"),
-                String::from("d"),
-            ]),
+            Index {
+                meta: NodeMeta::null(),
+                kind: IndexKind::Object(vec![
+                    String::from("a"),
+                    String::from("b"),
+                    String::from("c"),
+                    String::from("d"),
+                ]),
+            },
             true,
         );
         node.reindex(
             1,
-            Index::Object(vec![String::from("aa"), String::from("ab")]),
+            Index {
+                meta: NodeMeta::null(),
+                kind: IndexKind::Object(vec![String::from("aa"), String::from("ab")]),
+            },
             true,
         );
-        node.reindex(4, Index::Array(3), true);
-        node.reindex(8, Index::Array(5), true);
+        node.reindex(
+            4,
+            Index {
+                meta: NodeMeta::null(),
+                kind: IndexKind::Array(3),
+            },
+            true,
+        );
+        node.reindex(
+            8,
+            Index {
+                meta: NodeMeta::null(),
+                kind: IndexKind::Array(5),
+            },
+            true,
+        );
         node.close(8);
 
         assert_eq!(
@@ -258,23 +298,36 @@ mod test {
 
     #[test]
     fn work_tree_selector_test() {
-        let mut node = WorkTreeNode::new(String::from("root"));
+        let mut node = WorkTreeNode::new_empty(String::from("root"));
         node.reindex(
             0,
-            Index::Object(vec![
-                String::from("a"),
-                String::from("b"),
-                String::from("c"),
-                String::from("d"),
-            ]),
+            Index {
+                meta: NodeMeta::null(),
+                kind: IndexKind::Object(vec![
+                    String::from("a"),
+                    String::from("b"),
+                    String::from("c"),
+                    String::from("d"),
+                ]),
+            },
             true,
         );
         node.reindex(
             1,
-            Index::Object(vec![String::from("aa"), String::from("ab")]),
+            Index {
+                meta: NodeMeta::null(),
+                kind: IndexKind::Object(vec![String::from("aa"), String::from("ab")]),
+            },
             true,
         );
-        node.reindex(4, Index::Array(3), true);
+        node.reindex(
+            4,
+            Index {
+                meta: NodeMeta::null(),
+                kind: IndexKind::Array(3),
+            },
+            true,
+        );
 
         assert_eq!(node.len(), 10);
         assert_eq!(node.selector(0), Vec::<&str>::new());

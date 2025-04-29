@@ -37,9 +37,8 @@ impl Widget for &Loading {
     {
         let block = Block::bordered().padding(Padding::symmetric(1, 1));
         let area = popup_area(area, 5, 14);
+        Clear.render(area, buf);
         let inner_area = block.inner(area);
-
-        Clear.render(inner_area, buf);
 
         block.render(area, buf);
         self.loading_text().render(inner_area, buf);

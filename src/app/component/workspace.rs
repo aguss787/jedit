@@ -15,17 +15,12 @@ use ratatui::{
 };
 use worktree_node::WorkTreeNode;
 
-#[cfg(test)]
-use crate::error::LoadError;
-#[cfg(test)]
-use std::io::Read;
-
 use crate::{
     app::{
         Action, Actions,
         action::{ConfirmAction, NavigationAction, PreviewNavigation},
     },
-    container::node::{Index, Node},
+    container::node::{Index, IndexKind, Node, NodeMeta},
 };
 
 use super::{
@@ -48,7 +43,8 @@ pub struct WorkSpace {
 
 impl WorkSpace {
     pub fn new(file_root: Node) -> Self {
-        let work_tree_root = WorkTreeNode::new(String::from("root"));
+        let work_tree_root =
+            WorkTreeNode::new(String::from("root"), Some(file_root.as_index().meta));
         let list = new_list(&work_tree_root);
         Self {
             file_root,
@@ -172,7 +168,7 @@ impl WorkSpace {
 
     pub fn set_loading(&mut self, is_loading: bool) {
         if is_loading && self.loading.is_none() {
-            self.loading = Some(Loading::new());
+            self.loading = Some(Loading::default());
         } else if !is_loading {
             self.loading = None;
         }
@@ -246,7 +242,7 @@ impl WorkSpace {
             .subtree(&selector)
             .expect("broken selector")
             .as_index();
-        let is_terminal = matches!(node_index, Index::Terminal);
+        let is_terminal = matches!(node_index.kind, IndexKind::Terminal);
         self.reindex(index, node_index, true);
         !is_terminal
     }
@@ -284,31 +280,6 @@ impl WorkSpace {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub fn load_selected(
-        &mut self,
-        worktree_state: &WorkTreeState,
-        reader: impl Read,
-    ) -> Result<(), LoadError> {
-        let Some(index) = worktree_state.list_state.selected() else {
-            return Ok(());
-        };
-        let selector = self.work_tree_root.selector(index);
-        let new_node = Node::load(reader)?;
-
-        let node_index = new_node.as_index();
-        self.file_root
-            .replace(&selector, new_node)
-            .expect("broken selector");
-        self.reindex(index, node_index, false);
-        self.edit_cntr += 1;
-
-        if self.preview.is_some() {
-            self.set_preview_to_selected(worktree_state);
-        }
-        Ok(())
-    }
-
     pub fn replace_selected(&mut self, worktree_state: &WorkTreeState, new_node: Node) {
         let Some(index) = worktree_state.list_state.selected() else {
             return;
@@ -342,10 +313,33 @@ impl WorkSpace {
     }
 
     fn set_preview_to_selected(&mut self, state: &WorkTreeState) {
+        let Some(index) = state.list_state.selected() else {
+            return;
+        };
+        let meta = self.meta_on_index(index);
+
         let mut buffer = Vec::new();
-        let _ = self.write_selected(state, &mut buffer);
+        if meta.n_bytes <= 1024 * 1024 {
+            let _ = self.write_on_index(&mut buffer, index);
+        }
         let preview = String::from_utf8(buffer).unwrap_or_default();
         self.preview = Some(Preview::new((!preview.is_empty()).then_some(preview)))
+    }
+
+    fn meta_on_index(&mut self, index: usize) -> NodeMeta {
+        if let Some(meta) = self.work_tree_root.meta(index) {
+            return meta;
+        }
+
+        let selector = self.work_tree_root.selector(index);
+        let node_index = self
+            .file_root
+            .subtree(&selector)
+            .expect("broken selector")
+            .as_index();
+        let meta = node_index.meta;
+        self.reindex(index, node_index, false);
+        meta
     }
 }
 
@@ -408,8 +402,6 @@ impl WorkSpace {
         );
     }
 }
-
-impl WorkSpace {}
 
 fn new_list(work_tree_node: &WorkTreeNode) -> List<'static> {
     List::new(work_tree_node.as_tree_string())
@@ -570,9 +562,7 @@ mod test {
         worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
         worktree.handle_navigation_event(&mut state, NavigationAction::Up);
 
-        worktree
-            .load_selected(&state, "[{}, 5]".as_bytes())
-            .unwrap();
+        worktree.replace_selected(&state, Node::load("[{}, 5]".as_bytes()).unwrap());
 
         let mut buffer = Vec::new();
         worktree
@@ -581,32 +571,6 @@ mod test {
         assert_eq!(
             String::from_utf8(buffer).unwrap(),
             "{\n  \"key\": \"string\",\n  \"values\": [\n    {},\n    5\n  ]\n}"
-        );
-    }
-
-    #[test]
-    fn load_selected_invalid_json_test() {
-        let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
-
-        worktree.handle_navigation_event(&mut state, NavigationAction::Down);
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
-        worktree.handle_navigation_event(&mut state, NavigationAction::Up);
-
-        assert!(matches!(
-            worktree.load_selected(&state, "[{}, 5, asd]".as_bytes()),
-            Err(LoadError::SerdeJson(_)),
-        ));
-
-        let mut buffer = Vec::new();
-        worktree
-            .handle_save_action(ConfirmAction::Confirm(true), || &mut buffer)
-            .unwrap();
-        assert_eq!(
-            String::from_utf8(buffer).unwrap(),
-            "{\n  \"key\": \"string\",\n  \"values\": [\n    1,\n    2,\n    3\n  ]\n}"
         );
     }
 
@@ -689,21 +653,15 @@ mod test {
         assert!(worktree.maybe_exit(ConfirmAction::Request(())));
 
         let state = WorkTreeState::default();
-        worktree
-            .load_selected(&state, String::from("456").as_bytes())
-            .unwrap();
+        worktree.replace_selected(&state, Node::load(String::from("456").as_bytes()).unwrap());
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
         assert!(!worktree.maybe_exit(ConfirmAction::Confirm(false)));
 
-        worktree
-            .load_selected(&state, String::from("123").as_bytes())
-            .unwrap();
+        worktree.replace_selected(&state, Node::load(String::from("123").as_bytes()).unwrap());
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
         assert!(worktree.maybe_exit(ConfirmAction::Confirm(true)));
 
-        worktree
-            .load_selected(&state, String::from("123").as_bytes())
-            .unwrap();
+        worktree.replace_selected(&state, Node::load(String::from("123").as_bytes()).unwrap());
         let mut buffer = Vec::new();
         worktree.save(&mut buffer).unwrap();
         assert!(worktree.maybe_exit(ConfirmAction::Request(())));
@@ -715,9 +673,7 @@ mod test {
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
 
         let mut state = WorkTreeState::default();
-        worktree
-            .load_selected(&state, String::from("456").as_bytes())
-            .unwrap();
+        worktree.replace_selected(&state, Node::load(String::from("456").as_bytes()).unwrap());
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state,));
@@ -816,7 +772,7 @@ mod test {
         let mut state = WorkTreeState::default();
 
         worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
-        worktree.load_selected(&state, "123".as_bytes()).unwrap();
+        worktree.replace_selected(&state, Node::load("123".as_bytes()).unwrap());
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
@@ -828,11 +784,57 @@ mod test {
         let mut state = WorkTreeState::default();
 
         worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
-        worktree.load_selected(&state, json.as_bytes()).unwrap();
+        worktree.replace_selected(&state, Node::load(json.as_bytes()).unwrap());
         worktree.maybe_exit(ConfirmAction::Request(()));
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
         worktree.maybe_exit(ConfirmAction::Confirm(false));
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn meta_test() {
+        let json = include_str!("example.json");
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+
+        assert_eq!(
+            worktree.meta_on_index(0),
+            NodeMeta {
+                n_lines: 100,
+                n_bytes: 3718,
+            }
+        );
+    }
+
+    #[test]
+    fn render_loading_test() {
+        let json = include_str!("example.json");
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkTreeState::default();
+
+        worktree.toggle_preview(&state);
+        worktree.set_loading(true);
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.set_loading(false);
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_large_preview_test() {
+        let json_body = include_str!("example.json");
+        let json_bodies: Vec<_> = std::iter::repeat_n(json_body, 1024).collect();
+        let json = String::from("[") + &json_bodies.join(",") + "]";
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkTreeState::default();
+
+        worktree.toggle_preview(&state);
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.handle_navigation_event(&mut state, NavigationAction::Up);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
