@@ -7,7 +7,7 @@ pub enum SerializationError {
 #[derive(Debug, thiserror::Error)]
 pub enum DumpError {
     #[error("Serialization error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
+    SerdeJson(#[from] sonic_rs::Error),
     #[error(transparent)]
     SerializationError(#[from] SerializationError),
 }
@@ -21,7 +21,7 @@ pub enum DeserializationError {
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
     #[error("Deserialization error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
+    SerdeJson(#[from] sonic_rs::Error),
     #[error(transparent)]
     DeserializationError(#[from] DeserializationError),
     #[error(transparent)]

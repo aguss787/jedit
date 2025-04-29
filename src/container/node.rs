@@ -70,13 +70,13 @@ enum Kind {
 
 impl Node {
     pub fn load(reader: impl std::io::Read) -> Result<Self, LoadError> {
-        let value: serde_json::Value = serde_json::from_reader(reader)?;
+        let value: serde_json::Value = sonic_rs::from_reader(reader)?;
         Self::from_serde_json(value).map_err(Into::into)
     }
 
     pub fn to_string_pretty(&self) -> Result<String, DumpError> {
         let value = self.to_serde_json()?;
-        serde_json::to_string_pretty(&value).map_err(Into::into)
+        sonic_rs::to_string_pretty(&value).map_err(Into::into)
     }
 
     pub fn subtree<T: Deref<Target = str>>(&self, selector: &[T]) -> Result<&Node, IndexingError> {
@@ -363,8 +363,8 @@ mod test {
             .to_serde_json()
             .unwrap();
         assert_eq!(
-            serde_json::to_string(&from_node).unwrap(),
-            serde_json::to_string(&json_value).unwrap(),
+            sonic_rs::to_string(&from_node).unwrap(),
+            sonic_rs::to_string(&json_value).unwrap(),
         );
     }
 
