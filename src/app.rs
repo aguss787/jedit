@@ -57,7 +57,7 @@ impl CliApp {
         Ok(cli_app)
     }
 
-    pub fn run(mut self) -> std::io::Result<()> {
+    pub fn run(&mut self) -> std::io::Result<()> {
         let mut terminal = Terminal::new();
 
         while !self.state.exit {

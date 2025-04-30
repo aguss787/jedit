@@ -18,5 +18,6 @@ fn main() -> io::Result<()> {
     let args = Args::parse();
 
     let output = args.output.unwrap_or(args.input.clone());
-    CliApp::new(args.input, output)?.run()
+    let app = Box::leak(Box::new(CliApp::new(args.input, output)?));
+    app.run()
 }
