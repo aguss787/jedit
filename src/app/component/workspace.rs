@@ -1,6 +1,6 @@
 mod worktree_node;
 
-use std::io::Write;
+use std::{fs::File, io::Write};
 
 use crossterm::event::{Event, KeyCode};
 use ratatui::{
@@ -17,10 +17,12 @@ use worktree_node::WorkTreeNode;
 
 use crate::{
     app::{
-        Action, Actions,
-        action::{ConfirmAction, NavigationAction, PreviewNavigation},
+        Action, Actions, EDITOR_BUFFER, Terminal,
+        action::{ConfirmAction, NavigationAction, PreviewNavigation, WorkSpaceAction},
+        job::Job,
     },
     container::node::{Index, IndexKind, Node, NodeMeta},
+    error::LoadError,
 };
 
 use super::{
@@ -95,7 +97,7 @@ impl WorkSpace {
                 actions.push(Action::Exit(ConfirmAction::Request(())));
             }
             KeyCode::Char('e') => {
-                actions.push(Action::Edit);
+                actions.push(WorkSpaceAction::Edit.into());
             }
             KeyCode::Char('w') => {
                 actions.push(Action::Save(ConfirmAction::Request(())));
@@ -174,6 +176,51 @@ impl WorkSpace {
         }
     }
 
+    pub fn maybe_exit(&mut self, confirm_action: ConfirmAction<()>) -> bool {
+        match confirm_action {
+            ConfirmAction::Request(()) => {
+                if self.edit_cntr != 0 {
+                    self.dialogs.push(ConfirmDialog::new(
+                        Text::from(vec![Line::from("Discard unsaved changes?").centered()]),
+                        Box::new(ConfirmAction::action_confirmer(Action::Exit)),
+                    ));
+                }
+
+                self.edit_cntr == 0
+            }
+            ConfirmAction::Confirm(ok) => {
+                self.dialogs.pop();
+                ok
+            }
+        }
+    }
+
+    pub fn handle_action(
+        &mut self,
+        state: &mut WorkTreeState,
+        terminal: &mut Terminal,
+        actions: &mut Actions,
+        action: WorkSpaceAction,
+    ) -> std::io::Result<()> {
+        match action {
+            WorkSpaceAction::Edit => {
+                let mut file = File::create(EDITOR_BUFFER)?;
+                if !self.write_selected(state, &mut file)? {
+                    return Ok(());
+                };
+                drop(file);
+                actions.push(self.edit_in_editor(terminal)?);
+            }
+            WorkSpaceAction::EditError(confirm_action) => {
+                if self.handle_edit_error_action(confirm_action) {
+                    actions.push(self.edit_in_editor(terminal)?);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn handle_save_action<F: FnOnce() -> W, W: Write>(
         &mut self,
         confirm_action: ConfirmAction<()>,
@@ -194,47 +241,6 @@ impl WorkSpace {
         Ok(())
     }
 
-    pub fn handle_edit_error_action(&mut self, confirm_action: ConfirmAction<String>) -> bool {
-        match confirm_action {
-            ConfirmAction::Request(message) => {
-                let mut confirm_dialog = ConfirmDialog::new(
-                    Text::from(vec![
-                        Line::from(message),
-                        Line::from(""),
-                        Line::from("Continue to edit?").centered(),
-                    ]),
-                    Box::new(ConfirmAction::action_confirmer(Action::EditError)),
-                );
-                confirm_dialog.title(Some(Line::from("JSON Error").left_aligned()));
-                self.dialogs.push(confirm_dialog);
-                false
-            }
-            ConfirmAction::Confirm(ok) => {
-                self.dialogs.pop();
-                ok
-            }
-        }
-    }
-
-    pub fn maybe_exit(&mut self, confirm_action: ConfirmAction<()>) -> bool {
-        match confirm_action {
-            ConfirmAction::Request(()) => {
-                if self.edit_cntr != 0 {
-                    self.dialogs.push(ConfirmDialog::new(
-                        Text::from(vec![Line::from("Discard unsaved changes?").centered()]),
-                        Box::new(ConfirmAction::action_confirmer(Action::Exit)),
-                    ));
-                }
-
-                self.edit_cntr == 0
-            }
-            ConfirmAction::Confirm(ok) => {
-                self.dialogs.pop();
-                ok
-            }
-        }
-    }
-
     fn expand(&mut self, index: usize) -> bool {
         let selector = self.work_tree_root.selector(index);
         let node_index = self
@@ -247,7 +253,7 @@ impl WorkSpace {
         !is_terminal
     }
 
-    pub fn write_selected(
+    fn write_selected(
         &self,
         worktree_state: &WorkTreeState,
         writer: impl Write,
@@ -340,6 +346,51 @@ impl WorkSpace {
         let meta = node_index.meta;
         self.reindex(index, node_index, false);
         meta
+    }
+}
+
+impl WorkSpace {
+    fn handle_edit_error_action(&mut self, confirm_action: ConfirmAction<String>) -> bool {
+        match confirm_action {
+            ConfirmAction::Request(message) => {
+                let mut confirm_dialog = ConfirmDialog::new(
+                    Text::from(vec![
+                        Line::from(message),
+                        Line::from(""),
+                        Line::from("Continue to edit?").centered(),
+                    ]),
+                    Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::EditError)),
+                );
+                confirm_dialog.title(Some(Line::from("JSON Error").left_aligned()));
+                self.dialogs.push(confirm_dialog);
+                false
+            }
+            ConfirmAction::Confirm(ok) => {
+                self.dialogs.pop();
+                ok
+            }
+        }
+    }
+
+    fn edit_in_editor(&mut self, terminal: &mut Terminal) -> Result<Action, std::io::Error> {
+        terminal.run_editor(EDITOR_BUFFER)?;
+        let action = Action::RegisterJob(Job::new(|| {
+            let file = File::open(EDITOR_BUFFER)?;
+
+            match Node::load(file) {
+                Err(LoadError::IO(error)) => Err(error),
+                Err(LoadError::SerdeJson(error)) => Ok(WorkSpaceAction::EditError(
+                    ConfirmAction::Request(error.to_string()),
+                )
+                .into()),
+                Err(LoadError::DeserializationError(error)) => Ok(WorkSpaceAction::EditError(
+                    ConfirmAction::Request(error.to_string()),
+                )
+                .into()),
+                Ok(node) => Ok(Action::Load(node)),
+            }
+        }));
+        Ok(action)
     }
 }
 
@@ -480,7 +531,7 @@ mod test {
 
         for (key, action) in [
             (KeyCode::Char('q'), Action::Exit(ConfirmAction::Request(()))),
-            (KeyCode::Char('e'), Action::Edit),
+            (KeyCode::Char('e'), WorkSpaceAction::Edit.into()),
             (KeyCode::Char('w'), Action::Save(ConfirmAction::Request(()))),
         ] {
             assert_key_event_to_action(&worktree, key, vec![action]);
@@ -599,7 +650,7 @@ mod test {
         assert_key_event_to_action(
             &worktree,
             KeyCode::Char('y'),
-            vec![Action::EditError(ConfirmAction::Confirm(true))],
+            vec![WorkSpaceAction::EditError(ConfirmAction::Confirm(true)).into()],
         );
     }
 

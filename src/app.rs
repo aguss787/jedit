@@ -4,7 +4,7 @@ mod job;
 
 use std::{fs::File, io::stdout, process::Command, time::Duration};
 
-use action::{Action, Actions, ConfirmAction};
+use action::{Action, Actions};
 use component::workspace::{WorkSpace, WorkTreeState};
 use crossterm::{
     ExecutableCommand,
@@ -14,7 +14,7 @@ use crossterm::{
 use job::Job;
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::{container::node::Node, error::LoadError};
+use crate::container::node::Node;
 
 struct GlobalState {
     exit: bool,
@@ -105,29 +105,19 @@ impl CliApp {
                     self.state.exit = self.worktree.maybe_exit(confirm_action);
                     return Ok(());
                 }
+                Action::Workspace(workspace_action) => self.worktree.handle_action(
+                    &mut self.worktree_state,
+                    terminal,
+                    &mut actions,
+                    workspace_action,
+                )?,
                 Action::Navigation(navigation_action) => self
                     .worktree
                     .handle_navigation_event(&mut self.worktree_state, navigation_action),
-                Action::Edit => {
-                    let mut file = File::create(EDITOR_BUFFER)?;
-                    if !self
-                        .worktree
-                        .write_selected(&self.worktree_state, &mut file)?
-                    {
-                        continue;
-                    };
-                    drop(file);
-                    self.edit_in_editor(terminal, &mut actions)?;
-                }
                 Action::Save(confirm_action) => {
                     let output_file = File::create(&self.state.output_file_name)?;
                     self.worktree
                         .handle_save_action(confirm_action, move || output_file)?;
-                }
-                Action::EditError(confirm_action) => {
-                    if self.worktree.handle_edit_error_action(confirm_action) {
-                        self.edit_in_editor(terminal, &mut actions)?;
-                    }
                 }
                 Action::Load(node) => {
                     self.worktree.replace_selected(&self.worktree_state, node);
@@ -139,30 +129,6 @@ impl CliApp {
         }
 
         self.worktree.set_loading(!self.jobs.is_empty());
-        Ok(())
-    }
-
-    fn edit_in_editor(
-        &mut self,
-        terminal: &mut Terminal,
-        actions: &mut Actions,
-    ) -> Result<(), std::io::Error> {
-        terminal.run_editor(EDITOR_BUFFER)?;
-        actions.push(Action::RegisterJob(Job::new(|| {
-            let file = File::open(EDITOR_BUFFER)?;
-
-            match Node::load(file) {
-                Err(LoadError::IO(error)) => Err(error),
-                Err(LoadError::SerdeJson(error)) => {
-                    Ok(Action::EditError(ConfirmAction::Request(error.to_string())))
-                }
-                Err(LoadError::DeserializationError(error)) => {
-                    Ok(Action::EditError(ConfirmAction::Request(error.to_string())))
-                }
-                Ok(node) => Ok(Action::Load(node)),
-            }
-        })));
-
         Ok(())
     }
 }
@@ -179,7 +145,7 @@ fn global_exit_handler(event: &Event) -> bool {
     key_event.code == KeyCode::F(5)
 }
 
-struct Terminal(DefaultTerminal);
+pub struct Terminal(DefaultTerminal);
 
 impl Terminal {
     fn new() -> Self {

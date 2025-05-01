@@ -14,6 +14,7 @@ pub enum PreviewNavigation {
 }
 
 impl PreviewNavigation {
+    // TDDO: change into From impl
     pub fn to_action(self) -> Action {
         Action::Navigation(NavigationAction::PreviewNavigation(self))
     }
@@ -30,6 +31,12 @@ pub enum NavigationAction {
     PreviewNavigation(PreviewNavigation),
 }
 
+impl From<NavigationAction> for Action {
+    fn from(value: NavigationAction) -> Self {
+        Self::Navigation(value)
+    }
+}
+
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone, Copy))]
 pub enum ConfirmAction<T> {
@@ -38,8 +45,23 @@ pub enum ConfirmAction<T> {
 }
 
 impl<T> ConfirmAction<T> {
-    pub fn action_confirmer(f: impl Fn(ConfirmAction<T>) -> Action) -> impl Fn(bool) -> Action {
-        move |b| f(ConfirmAction::Confirm(b))
+    pub fn action_confirmer<R: Into<Action>>(
+        f: impl Fn(ConfirmAction<T>) -> R,
+    ) -> impl Fn(bool) -> Action {
+        move |b| f(ConfirmAction::Confirm(b)).into()
+    }
+}
+
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum WorkSpaceAction {
+    Edit,
+    EditError(ConfirmAction<String>),
+}
+
+impl From<WorkSpaceAction> for Action {
+    fn from(value: WorkSpaceAction) -> Self {
+        Self::Workspace(value)
     }
 }
 
@@ -48,9 +70,8 @@ impl<T> ConfirmAction<T> {
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Action {
     Exit(ConfirmAction<()>),
+    Workspace(WorkSpaceAction),
     Navigation(NavigationAction),
-    Edit,
-    EditError(ConfirmAction<String>),
     Save(ConfirmAction<()>),
     Load(Node),
     RegisterJob(Job),
@@ -90,9 +111,12 @@ mod test {
     #[test]
     fn actions_in_order_test() {
         let mut actions = Actions::new();
-        actions.push(Action::Edit);
+        actions.push(Action::Workspace(WorkSpaceAction::Edit));
         actions.push(Action::Exit(ConfirmAction::Request(())));
-        assert_eq!(actions.next(), Some(Action::Edit));
+        assert_eq!(
+            actions.next(),
+            Some(Action::Workspace(WorkSpaceAction::Edit))
+        );
         assert_eq!(
             actions.next(),
             Some(Action::Exit(ConfirmAction::Request(())))
