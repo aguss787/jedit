@@ -57,6 +57,8 @@ impl<T> ConfirmAction<T> {
 pub enum WorkSpaceAction {
     Edit,
     EditError(ConfirmAction<String>),
+    Save(ConfirmAction<()>),
+    SaveDone,
 }
 
 impl From<WorkSpaceAction> for Action {
@@ -72,7 +74,6 @@ pub enum Action {
     Exit(ConfirmAction<()>),
     Workspace(WorkSpaceAction),
     Navigation(NavigationAction),
-    Save(ConfirmAction<()>),
     Load(Node),
     RegisterJob(Job),
 }

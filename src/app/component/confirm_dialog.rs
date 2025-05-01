@@ -89,34 +89,43 @@ mod test {
     use ratatui::text::Line;
 
     use super::*;
-    use crate::app::{action::ConfirmAction, component::test_render::render_to_string};
+    use crate::app::{
+        action::{ConfirmAction, WorkSpaceAction},
+        component::test_render::render_to_string,
+    };
 
     #[test]
     fn event_handler_test() {
         let dialog = ConfirmDialog::new(
             Text::default(),
-            Box::new(ConfirmAction::action_confirmer(Action::Save)),
+            Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::Save)),
         );
 
         for (code, action) in [
             (
                 KeyCode::Char('y'),
-                Action::Save(ConfirmAction::Confirm(true)),
+                WorkSpaceAction::Save(ConfirmAction::Confirm(true)).into(),
             ),
             (
                 KeyCode::Char('Y'),
-                Action::Save(ConfirmAction::Confirm(true)),
+                WorkSpaceAction::Save(ConfirmAction::Confirm(true)).into(),
             ),
-            (KeyCode::Enter, Action::Save(ConfirmAction::Confirm(true))),
+            (
+                KeyCode::Enter,
+                WorkSpaceAction::Save(ConfirmAction::Confirm(true)).into(),
+            ),
             (
                 KeyCode::Char('n'),
-                Action::Save(ConfirmAction::Confirm(false)),
+                WorkSpaceAction::Save(ConfirmAction::Confirm(false)).into(),
             ),
             (
                 KeyCode::Char('N'),
-                Action::Save(ConfirmAction::Confirm(false)),
+                WorkSpaceAction::Save(ConfirmAction::Confirm(false)).into(),
             ),
-            (KeyCode::Esc, Action::Save(ConfirmAction::Confirm(false))),
+            (
+                KeyCode::Esc,
+                WorkSpaceAction::Save(ConfirmAction::Confirm(false)).into(),
+            ),
         ] {
             let mut actions = Actions::new();
             dialog.handle_event(
@@ -137,7 +146,7 @@ mod test {
         for prompt in ["Are you sure?", "Save all files in workspace?"] {
             let dialog = ConfirmDialog::new(
                 Text::from(vec![Line::from(prompt).centered()]),
-                Box::new(ConfirmAction::action_confirmer(Action::Save)),
+                Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::Save)),
             );
 
             assert_snapshot!(render_to_string(&dialog));
@@ -152,7 +161,7 @@ mod test {
         message.push_line(Line::from("continue?"));
         let dialog = ConfirmDialog::new(
             message,
-            Box::new(ConfirmAction::action_confirmer(Action::Save)),
+            Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::Save)),
         );
 
         assert_snapshot!(render_to_string(&dialog));
@@ -165,7 +174,7 @@ mod test {
         message.push_line(Line::from("continue?"));
         let mut dialog = ConfirmDialog::new(
             message,
-            Box::new(ConfirmAction::action_confirmer(Action::Save)),
+            Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::Save)),
         );
         dialog.title(Some(Line::from("Error")));
 
@@ -184,7 +193,7 @@ mod test {
         message.push_line(Line::from("continue?").centered());
         let dialog = ConfirmDialog::new(
             message,
-            Box::new(ConfirmAction::action_confirmer(Action::Save)),
+            Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::Save)),
         );
 
         assert_snapshot!(render_to_string(&dialog));

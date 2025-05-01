@@ -33,6 +33,7 @@ use super::{
 };
 
 pub struct WorkSpace {
+    output_file_name: String,
     file_root: Node,
     work_tree_root: WorkTreeNode,
     edit_cntr: i64,
@@ -44,11 +45,12 @@ pub struct WorkSpace {
 }
 
 impl WorkSpace {
-    pub fn new(file_root: Node) -> Self {
+    pub fn new(file_root: Node, output_file_name: String) -> Self {
         let work_tree_root =
             WorkTreeNode::new(String::from("root"), Some(file_root.as_index().meta));
         let list = new_list(&work_tree_root);
         Self {
+            output_file_name,
             file_root,
             work_tree_root,
             edit_cntr: 0,
@@ -100,7 +102,7 @@ impl WorkSpace {
                 actions.push(WorkSpaceAction::Edit.into());
             }
             KeyCode::Char('w') => {
-                actions.push(Action::Save(ConfirmAction::Request(())));
+                actions.push(WorkSpaceAction::Save(ConfirmAction::Request(())).into());
             }
             KeyCode::Char('H') => {
                 actions.push(PreviewNavigation::Left.to_action());
@@ -216,28 +218,20 @@ impl WorkSpace {
                     actions.push(self.edit_in_editor(terminal)?);
                 }
             }
-        }
-
-        Ok(())
-    }
-
-    pub fn handle_save_action<F: FnOnce() -> W, W: Write>(
-        &mut self,
-        confirm_action: ConfirmAction<()>,
-        writer_getter: F,
-    ) -> std::io::Result<()> {
-        match confirm_action {
-            ConfirmAction::Request(()) => self.dialogs.push(ConfirmDialog::new(
-                Text::from(Line::from("Write file?").centered()),
-                Box::new(ConfirmAction::action_confirmer(Action::Save)),
-            )),
-            ConfirmAction::Confirm(ok) => {
-                if ok {
-                    self.save(writer_getter())?;
-                }
+            WorkSpaceAction::Save(confirm_action) => {
                 self.dialogs.pop();
+                let output_file = File::create(&self.output_file_name)?;
+                if let Some(action) =
+                    self.handle_save_action(confirm_action, move || output_file)?
+                {
+                    actions.push(action);
+                }
+            }
+            WorkSpaceAction::SaveDone => {
+                self.handle_save_done();
             }
         }
+
         Ok(())
     }
 
@@ -264,14 +258,6 @@ impl WorkSpace {
         self.write_on_index(writer, index)?;
 
         Ok(true)
-    }
-
-    fn save(&mut self, writer: impl Write) -> Result<(), std::io::Error> {
-        let res = self.write_on_index(writer, 0);
-        if res.is_ok() {
-            self.edit_cntr = 0;
-        }
-        res
     }
 
     fn write_on_index(&self, mut writer: impl Write, index: usize) -> Result<(), std::io::Error> {
@@ -346,6 +332,57 @@ impl WorkSpace {
         let meta = node_index.meta;
         self.reindex(index, node_index, false);
         meta
+    }
+}
+
+struct NodeJob(*const Node);
+unsafe impl Send for NodeJob {}
+unsafe impl Sync for NodeJob {}
+
+impl WorkSpace {
+    fn handle_save_action<F: FnOnce() -> W, W: Write + Sync + Send + 'static>(
+        &mut self,
+        confirm_action: ConfirmAction<()>,
+        writer_getter: F,
+    ) -> std::io::Result<Option<Action>> {
+        match confirm_action {
+            ConfirmAction::Request(()) => {
+                self.dialogs.push(ConfirmDialog::new(
+                    Text::from(Line::from("Write file?").centered()),
+                    Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::Save)),
+                ));
+                Ok(None)
+            }
+            ConfirmAction::Confirm(ok) => {
+                if ok {
+                    let selector = self.work_tree_root.selector(0);
+                    let content: *const Node =
+                        self.file_root.subtree(&selector).expect("broken selector");
+                    let content = NodeJob(content);
+                    let mut writer = writer_getter();
+                    let action = Action::RegisterJob(Job::new(move || {
+                        let _ = &content;
+                        let content =
+                            unsafe { content.0.as_ref().expect("invalid pointer to content") };
+                        writer.write_all(
+                            content
+                                .to_string_pretty()
+                                .expect("invalid internal representation")
+                                .as_bytes(),
+                        )?;
+                        Ok(WorkSpaceAction::SaveDone.into())
+                    }));
+                    Ok(Some(action))
+                } else {
+                    self.dialogs.pop();
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    fn handle_save_done(&mut self) {
+        self.edit_cntr = 0;
     }
 }
 
@@ -464,6 +501,8 @@ fn new_list(work_tree_node: &WorkTreeNode) -> List<'static> {
 
 #[cfg(test)]
 mod test {
+    use std::sync::{Arc, Mutex};
+
     use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use insta::assert_snapshot;
 
@@ -474,7 +513,7 @@ mod test {
     #[test]
     fn event_handler_ignore_key_release_test() {
         let json = String::from("123");
-        let worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         assert_event_to_action(
             &worktree,
@@ -491,7 +530,7 @@ mod test {
     #[test]
     fn event_handler_navigation_test() {
         let json = String::from("123");
-        let worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         for (key, action) in [
             (KeyCode::Up, NavigationAction::Up),
@@ -527,12 +566,15 @@ mod test {
     #[test]
     fn event_handler_fileops_test() {
         let json = String::from("123");
-        let worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         for (key, action) in [
             (KeyCode::Char('q'), Action::Exit(ConfirmAction::Request(()))),
             (KeyCode::Char('e'), WorkSpaceAction::Edit.into()),
-            (KeyCode::Char('w'), Action::Save(ConfirmAction::Request(()))),
+            (
+                KeyCode::Char('w'),
+                WorkSpaceAction::Save(ConfirmAction::Request(())).into(),
+            ),
         ] {
             assert_key_event_to_action(&worktree, key, vec![action]);
         }
@@ -541,10 +583,9 @@ mod test {
     #[test]
     fn event_handler_ignore_on_confirm_dialog() {
         let json = String::from("123");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut buffer = Vec::new();
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         worktree
-            .handle_save_action(ConfirmAction::Request(()), || &mut buffer)
+            .handle_save_action(ConfirmAction::Request(()), Vec::new)
             .unwrap();
 
         for key in [
@@ -558,7 +599,7 @@ mod test {
         }
 
         worktree
-            .handle_save_action(ConfirmAction::Confirm(false), || &mut buffer)
+            .handle_save_action(ConfirmAction::Confirm(false), Vec::new)
             .unwrap();
         assert_key_event_to_action(
             &worktree,
@@ -570,7 +611,7 @@ mod test {
     #[test]
     fn handle_navigation_action() {
         let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
         worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
@@ -589,7 +630,7 @@ mod test {
     #[test]
     fn write_selected_test() {
         let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
         worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
 
@@ -605,7 +646,7 @@ mod test {
     #[test]
     fn load_selected_test() {
         let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
         worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
 
@@ -615,12 +656,16 @@ mod test {
 
         worktree.replace_selected(&state, Node::load("[{}, 5]".as_bytes()).unwrap());
 
-        let mut buffer = Vec::new();
-        worktree
-            .handle_save_action(ConfirmAction::Confirm(true), || &mut buffer)
-            .unwrap();
+        let buffer = Buffer::new();
+        let Some(Action::RegisterJob(job)) = worktree
+            .handle_save_action(ConfirmAction::Confirm(true), || buffer.clone())
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let _ = job.action().unwrap();
         assert_eq!(
-            String::from_utf8(buffer).unwrap(),
+            String::from_utf8(buffer.to_vec()).unwrap(),
             "{\n  \"key\": \"string\",\n  \"values\": [\n    {},\n    5\n  ]\n}"
         );
     }
@@ -628,7 +673,7 @@ mod test {
     #[test]
     fn handle_edit_error_action_test() {
         let json = String::from("123");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         assert!(!worktree.handle_edit_error_action(ConfirmAction::Request(String::from("error"))));
         assert_eq!(worktree.dialogs.len(), 1);
@@ -644,7 +689,7 @@ mod test {
     #[test]
     fn event_handler_dialog_test() {
         let json = String::from("123");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         worktree.handle_edit_error_action(ConfirmAction::Request(String::from("error")));
         assert_key_event_to_action(
@@ -657,7 +702,7 @@ mod test {
     #[test]
     fn render_edit_error_test() {
         let json = String::from("123");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         for response in [true, false] {
             worktree.handle_edit_error_action(ConfirmAction::Request(String::from(
@@ -681,7 +726,7 @@ mod test {
     #[test]
     fn render_edit_error_long_message_test() {
         let json = String::from("123");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         worktree.handle_edit_error_action(ConfirmAction::Request(String::from(
             concat!(
@@ -700,7 +745,7 @@ mod test {
     #[test]
     fn exit_without_change_test() {
         let json = String::from("123");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         assert!(worktree.maybe_exit(ConfirmAction::Request(())));
 
         let state = WorkTreeState::default();
@@ -713,15 +758,14 @@ mod test {
         assert!(worktree.maybe_exit(ConfirmAction::Confirm(true)));
 
         worktree.replace_selected(&state, Node::load(String::from("123").as_bytes()).unwrap());
-        let mut buffer = Vec::new();
-        worktree.save(&mut buffer).unwrap();
+        worktree.handle_save_done();
         assert!(worktree.maybe_exit(ConfirmAction::Request(())));
     }
 
     #[test]
     fn render_exit_confirm_test() {
         let json = String::from("123");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         let mut state = WorkTreeState::default();
         worktree.replace_selected(&state, Node::load(String::from("456").as_bytes()).unwrap());
@@ -733,12 +777,11 @@ mod test {
     #[test]
     fn render_save_dialog_test() {
         let json = String::from("123");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         let mut state = WorkTreeState::default();
-        let mut buffer = Vec::new();
         worktree
-            .handle_save_action(ConfirmAction::Request(()), || &mut buffer)
+            .handle_save_action(ConfirmAction::Request(()), Vec::new)
             .unwrap();
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state,));
@@ -751,7 +794,7 @@ mod test {
             "array": [1, 2, ["cat", "dog"]]
         }))
         .unwrap();
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
         worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
@@ -774,7 +817,7 @@ mod test {
             "array": [1, 2, ["cat", "dog"]]
         }))
         .unwrap();
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
         for action in [
@@ -794,7 +837,7 @@ mod test {
     #[test]
     fn render_preview_scroll_test() {
         let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
         for action in [NavigationAction::TogglePreview, NavigationAction::Expand] {
@@ -819,7 +862,7 @@ mod test {
     #[test]
     fn render_preview_update_on_edit_test() {
         let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
         worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
@@ -831,7 +874,7 @@ mod test {
     #[test]
     fn render_preview_overlap_test() {
         let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
         worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
@@ -846,7 +889,7 @@ mod test {
     #[test]
     fn meta_test() {
         let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
 
         assert_eq!(
             worktree.meta_on_index(0),
@@ -860,7 +903,7 @@ mod test {
     #[test]
     fn render_loading_test() {
         let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
         worktree.toggle_preview(&state);
@@ -876,7 +919,7 @@ mod test {
         let json_body = include_str!("example.json");
         let json_bodies: Vec<_> = std::iter::repeat_n(json_body, 1024).collect();
         let json = String::from("[") + &json_bodies.join(",") + "]";
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
         worktree.toggle_preview(&state);
@@ -910,5 +953,42 @@ mod test {
         let mut actions = Actions::new();
         worktree.handle_event(&mut actions, event);
         assert_eq!(actions.into_vec(), expected_actions)
+    }
+
+    fn new_temp_file() -> String {
+        let key: u64 = rand::random();
+        format!("/tmp/jedit-test-{key}")
+    }
+
+    #[derive(Clone)]
+    struct Buffer {
+        lock: Arc<Mutex<()>>,
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl Buffer {
+        fn new() -> Self {
+            Self {
+                lock: Arc::new(Mutex::new(())),
+                buffer: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn to_vec(&self) -> Vec<u8> {
+            self.buffer.lock().unwrap().clone()
+        }
+    }
+
+    impl Write for Buffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let _lock = self.lock.lock().unwrap();
+            let mut buffer = self.buffer.lock().unwrap();
+            buffer.extend(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 }

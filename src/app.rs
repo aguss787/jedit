@@ -18,7 +18,6 @@ use crate::container::node::Node;
 
 struct GlobalState {
     exit: bool,
-    output_file_name: String,
 }
 
 pub struct CliApp {
@@ -40,12 +39,9 @@ impl CliApp {
         });
 
         let mut cli_app = Self {
-            worktree: WorkSpace::new(Node::null()),
+            worktree: WorkSpace::new(Node::null(), output_file_name),
             worktree_state: WorkTreeState::default(),
-            state: GlobalState {
-                exit: false,
-                output_file_name,
-            },
+            state: GlobalState { exit: false },
             jobs: vec![initial_load_job],
         };
         cli_app.worktree.decrease_edit_cntr();
@@ -114,11 +110,6 @@ impl CliApp {
                 Action::Navigation(navigation_action) => self
                     .worktree
                     .handle_navigation_event(&mut self.worktree_state, navigation_action),
-                Action::Save(confirm_action) => {
-                    let output_file = File::create(&self.state.output_file_name)?;
-                    self.worktree
-                        .handle_save_action(confirm_action, move || output_file)?;
-                }
                 Action::Load(node) => {
                     self.worktree.replace_selected(&self.worktree_state, node);
                 }
