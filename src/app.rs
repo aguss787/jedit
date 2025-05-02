@@ -4,7 +4,7 @@ mod job;
 
 use std::{fs::File, io::stdout, process::Command, time::Duration};
 
-use action::{Action, Actions};
+use action::{Action, Actions, NavigationAction};
 use component::workspace::{WorkSpace, WorkTreeState};
 use crossterm::{
     ExecutableCommand,
@@ -45,16 +45,18 @@ impl CliApp {
             jobs: vec![initial_load_job],
         };
         cli_app.worktree.decrease_edit_cntr();
-
-        cli_app.worktree.handle_navigation_event(
-            &mut cli_app.worktree_state,
-            action::NavigationAction::TogglePreview,
-        );
         Ok(cli_app)
     }
 
     pub fn run(&mut self) -> std::io::Result<()> {
         let mut terminal = Terminal::new();
+
+        self.worktree.handle_action(
+            &mut self.worktree_state,
+            &mut terminal,
+            &mut Actions::new(),
+            NavigationAction::TogglePreview.into(),
+        )?;
 
         while !self.state.exit {
             terminal.0.draw(|frame| self.draw(frame))?;
@@ -107,9 +109,6 @@ impl CliApp {
                     &mut actions,
                     workspace_action,
                 )?,
-                Action::Navigation(navigation_action) => self
-                    .worktree
-                    .handle_navigation_event(&mut self.worktree_state, navigation_action),
                 Action::Load(node) => {
                     self.worktree.replace_selected(&self.worktree_state, node);
                 }

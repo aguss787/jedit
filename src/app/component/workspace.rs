@@ -18,7 +18,7 @@ use worktree_node::WorkTreeNode;
 use crate::{
     app::{
         Action, Actions, EDITOR_BUFFER, Terminal,
-        action::{ConfirmAction, NavigationAction, PreviewNavigation, WorkSpaceAction},
+        action::{ConfirmAction, NavigationAction, PreviewNavigationAction, WorkSpaceAction},
         job::Job,
     },
     container::node::{Index, IndexKind, Node, NodeMeta},
@@ -81,19 +81,19 @@ impl WorkSpace {
 
         match event.code {
             KeyCode::Char('k') | KeyCode::Up => {
-                actions.push(Action::Navigation(NavigationAction::Up));
+                actions.push(NavigationAction::Up.into());
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                actions.push(Action::Navigation(NavigationAction::Down));
+                actions.push(NavigationAction::Down.into());
             }
             KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ') => {
-                actions.push(Action::Navigation(NavigationAction::Expand));
+                actions.push(NavigationAction::Expand.into());
             }
             KeyCode::Char('h') => {
-                actions.push(Action::Navigation(NavigationAction::Close));
+                actions.push(NavigationAction::Close.into());
             }
             KeyCode::Char('p') => {
-                actions.push(Action::Navigation(NavigationAction::TogglePreview));
+                actions.push(NavigationAction::TogglePreview.into());
             }
             KeyCode::Char('q') => {
                 actions.push(Action::Exit(ConfirmAction::Request(())));
@@ -105,68 +105,18 @@ impl WorkSpace {
                 actions.push(WorkSpaceAction::Save(ConfirmAction::Request(())).into());
             }
             KeyCode::Char('H') => {
-                actions.push(PreviewNavigation::Left.to_action());
+                actions.push(PreviewNavigationAction::Left.into());
             }
             KeyCode::Char('J') => {
-                actions.push(PreviewNavigation::Down.to_action());
+                actions.push(PreviewNavigationAction::Down.into());
             }
             KeyCode::Char('K') => {
-                actions.push(PreviewNavigation::Up.to_action());
+                actions.push(PreviewNavigationAction::Up.into());
             }
             KeyCode::Char('L') => {
-                actions.push(PreviewNavigation::Right.to_action());
+                actions.push(PreviewNavigationAction::Right.into());
             }
             _ => {}
-        }
-    }
-
-    pub fn handle_navigation_event(
-        &mut self,
-        state: &mut WorkTreeState,
-        navigation_action: NavigationAction,
-    ) {
-        let prev_index = state.list_state.selected();
-        match navigation_action {
-            NavigationAction::Up => {
-                if state.list_state.selected().is_some_and(|index| index > 0) {
-                    state.list_state.select_previous();
-                }
-            }
-            NavigationAction::Down => {
-                if state
-                    .list_state
-                    .selected()
-                    .is_some_and(|index| index + 1 < self.work_tree_root.len())
-                {
-                    state.list_state.select_next();
-                }
-            }
-            NavigationAction::Expand => {
-                if let Some(index) = state.list_state.selected() {
-                    if self.expand(index) {
-                        state.list_state.select_next();
-                    }
-                }
-            }
-            NavigationAction::Close => {
-                if let Some(index) = state.list_state.selected() {
-                    self.work_tree_root.close(index);
-                    self.list = new_list(&self.work_tree_root);
-                }
-            }
-            NavigationAction::TogglePreview => {
-                self.toggle_preview(state);
-            }
-            NavigationAction::PreviewNavigation(preview_navigation) => match preview_navigation {
-                PreviewNavigation::Up => state.preview_state.scroll_up(),
-                PreviewNavigation::Down => state.preview_state.scroll_down(),
-                PreviewNavigation::Left => state.preview_state.scroll_left(),
-                PreviewNavigation::Right => state.preview_state.scroll_right(),
-            },
-        }
-
-        if self.preview.is_some() && prev_index != state.list_state.selected() {
-            self.set_preview_to_selected(state);
         }
     }
 
@@ -205,6 +155,9 @@ impl WorkSpace {
         action: WorkSpaceAction,
     ) -> std::io::Result<()> {
         match action {
+            WorkSpaceAction::Navigation(navigation_action) => {
+                self.handle_navigation_action(state, navigation_action);
+            }
             WorkSpaceAction::Edit => {
                 let mut file = File::create(EDITOR_BUFFER)?;
                 if !self.write_selected(state, &mut file)? {
@@ -233,6 +186,56 @@ impl WorkSpace {
         }
 
         Ok(())
+    }
+
+    fn handle_navigation_action(
+        &mut self,
+        state: &mut WorkTreeState,
+        navigation_action: NavigationAction,
+    ) {
+        let prev_index = state.list_state.selected();
+        match navigation_action {
+            NavigationAction::Up => {
+                if state.list_state.selected().is_some_and(|index| index > 0) {
+                    state.list_state.select_previous();
+                }
+            }
+            NavigationAction::Down => {
+                if state
+                    .list_state
+                    .selected()
+                    .is_some_and(|index| index + 1 < self.work_tree_root.len())
+                {
+                    state.list_state.select_next();
+                }
+            }
+            NavigationAction::Expand => {
+                if let Some(index) = state.list_state.selected() {
+                    if self.expand(index) {
+                        state.list_state.select_next();
+                    }
+                }
+            }
+            NavigationAction::Close => {
+                if let Some(index) = state.list_state.selected() {
+                    self.work_tree_root.close(index);
+                    self.list = new_list(&self.work_tree_root);
+                }
+            }
+            NavigationAction::TogglePreview => {
+                self.toggle_preview(state);
+            }
+            NavigationAction::PreviewNavigation(preview_navigation) => match preview_navigation {
+                PreviewNavigationAction::Up => state.preview_state.scroll_up(),
+                PreviewNavigationAction::Down => state.preview_state.scroll_down(),
+                PreviewNavigationAction::Left => state.preview_state.scroll_left(),
+                PreviewNavigationAction::Right => state.preview_state.scroll_right(),
+            },
+        }
+
+        if self.preview.is_some() && prev_index != state.list_state.selected() {
+            self.set_preview_to_selected(state);
+        }
     }
 
     fn expand(&mut self, index: usize) -> bool {
@@ -544,22 +547,22 @@ mod test {
             (KeyCode::Char('p'), NavigationAction::TogglePreview),
             (
                 KeyCode::Char('K'),
-                NavigationAction::PreviewNavigation(PreviewNavigation::Up),
+                NavigationAction::PreviewNavigation(PreviewNavigationAction::Up),
             ),
             (
                 KeyCode::Char('J'),
-                NavigationAction::PreviewNavigation(PreviewNavigation::Down),
+                NavigationAction::PreviewNavigation(PreviewNavigationAction::Down),
             ),
             (
                 KeyCode::Char('H'),
-                NavigationAction::PreviewNavigation(PreviewNavigation::Left),
+                NavigationAction::PreviewNavigation(PreviewNavigationAction::Left),
             ),
             (
                 KeyCode::Char('L'),
-                NavigationAction::PreviewNavigation(PreviewNavigation::Right),
+                NavigationAction::PreviewNavigation(PreviewNavigationAction::Right),
             ),
         ] {
-            assert_key_event_to_action(&worktree, key, vec![Action::Navigation(action)]);
+            assert_key_event_to_action(&worktree, key, vec![action.into()]);
         }
     }
 
@@ -601,11 +604,7 @@ mod test {
         worktree
             .handle_save_action(ConfirmAction::Confirm(false), Vec::new)
             .unwrap();
-        assert_key_event_to_action(
-            &worktree,
-            KeyCode::Up,
-            vec![Action::Navigation(NavigationAction::Up)],
-        );
+        assert_key_event_to_action(&worktree, KeyCode::Up, vec![NavigationAction::Up.into()]);
     }
 
     #[test]
@@ -613,17 +612,17 @@ mod test {
         let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::Down);
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Down);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
         for _ in 0..3 {
-            worktree.handle_navigation_event(&mut state, NavigationAction::Up);
+            worktree.handle_navigation_action(&mut state, NavigationAction::Up);
         }
-        worktree.handle_navigation_event(&mut state, NavigationAction::Close);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Close);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
@@ -632,11 +631,11 @@ mod test {
         let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::Down);
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
-        worktree.handle_navigation_event(&mut state, NavigationAction::Up);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Down);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Up);
 
         let mut buffer = Vec::new();
         worktree.write_selected(&state, &mut buffer).unwrap();
@@ -648,11 +647,11 @@ mod test {
         let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::Down);
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
-        worktree.handle_navigation_event(&mut state, NavigationAction::Up);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Down);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Up);
 
         worktree.replace_selected(&state, Node::load("[{}, 5]".as_bytes()).unwrap());
 
@@ -797,16 +796,16 @@ mod test {
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
+        worktree.handle_navigation_action(&mut state, NavigationAction::TogglePreview);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::Down);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Down);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
+        worktree.handle_navigation_action(&mut state, NavigationAction::TogglePreview);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
@@ -828,7 +827,7 @@ mod test {
             NavigationAction::Down,
             NavigationAction::Up,
         ] {
-            worktree.handle_navigation_event(&mut state, action);
+            worktree.handle_navigation_action(&mut state, action);
         }
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
@@ -841,20 +840,20 @@ mod test {
         let mut state = WorkTreeState::default();
 
         for action in [NavigationAction::TogglePreview, NavigationAction::Expand] {
-            worktree.handle_navigation_event(&mut state, action);
+            worktree.handle_navigation_action(&mut state, action);
         }
 
         for action in [
-            PreviewNavigation::Up,
-            PreviewNavigation::Down,
-            PreviewNavigation::Down,
-            PreviewNavigation::Up,
-            PreviewNavigation::Right,
-            PreviewNavigation::Right,
-            PreviewNavigation::Left,
+            PreviewNavigationAction::Up,
+            PreviewNavigationAction::Down,
+            PreviewNavigationAction::Down,
+            PreviewNavigationAction::Up,
+            PreviewNavigationAction::Right,
+            PreviewNavigationAction::Right,
+            PreviewNavigationAction::Left,
         ] {
             worktree
-                .handle_navigation_event(&mut state, NavigationAction::PreviewNavigation(action));
+                .handle_navigation_action(&mut state, NavigationAction::PreviewNavigation(action));
             assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
         }
     }
@@ -865,7 +864,7 @@ mod test {
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
+        worktree.handle_navigation_action(&mut state, NavigationAction::TogglePreview);
         worktree.replace_selected(&state, Node::load("123".as_bytes()).unwrap());
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
@@ -877,7 +876,7 @@ mod test {
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), new_temp_file());
         let mut state = WorkTreeState::default();
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::TogglePreview);
+        worktree.handle_navigation_action(&mut state, NavigationAction::TogglePreview);
         worktree.replace_selected(&state, Node::load(json.as_bytes()).unwrap());
         worktree.maybe_exit(ConfirmAction::Request(()));
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
@@ -925,10 +924,10 @@ mod test {
         worktree.toggle_preview(&state);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::Expand);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_event(&mut state, NavigationAction::Up);
+        worktree.handle_navigation_action(&mut state, NavigationAction::Up);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 

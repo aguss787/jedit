@@ -6,17 +6,16 @@ use super::job::Job;
 
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(test, derive(PartialEq))]
-pub enum PreviewNavigation {
+pub enum PreviewNavigationAction {
     Up,
     Down,
     Left,
     Right,
 }
 
-impl PreviewNavigation {
-    // TDDO: change into From impl
-    pub fn to_action(self) -> Action {
-        Action::Navigation(NavigationAction::PreviewNavigation(self))
+impl From<PreviewNavigationAction> for Action {
+    fn from(value: PreviewNavigationAction) -> Self {
+        NavigationAction::PreviewNavigation(value).into()
     }
 }
 
@@ -28,12 +27,18 @@ pub enum NavigationAction {
     Expand,
     Close,
     TogglePreview,
-    PreviewNavigation(PreviewNavigation),
+    PreviewNavigation(PreviewNavigationAction),
 }
 
 impl From<NavigationAction> for Action {
     fn from(value: NavigationAction) -> Self {
-        Self::Navigation(value)
+        WorkSpaceAction::from(value).into()
+    }
+}
+
+impl From<NavigationAction> for WorkSpaceAction {
+    fn from(value: NavigationAction) -> Self {
+        WorkSpaceAction::Navigation(value)
     }
 }
 
@@ -55,6 +60,7 @@ impl<T> ConfirmAction<T> {
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum WorkSpaceAction {
+    Navigation(NavigationAction),
     Edit,
     EditError(ConfirmAction<String>),
     Save(ConfirmAction<()>),
@@ -73,7 +79,6 @@ impl From<WorkSpaceAction> for Action {
 pub enum Action {
     Exit(ConfirmAction<()>),
     Workspace(WorkSpaceAction),
-    Navigation(NavigationAction),
     Load(Node),
     RegisterJob(Job),
 }
