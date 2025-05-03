@@ -2,9 +2,14 @@ mod action;
 mod component;
 mod job;
 
-use std::{fs::File, io::stdout, process::Command, time::Duration};
+use std::{
+    fs::File,
+    io::{Write, stdout},
+    process::Command,
+    time::Duration,
+};
 
-use action::{Action, Actions, NavigationAction};
+use action::{Action, Actions, ConfirmAction, JobAction, NavigationAction, WorkSpaceAction};
 use component::workspace::{WorkSpace, WorkTreeState};
 use crossterm::{
     ExecutableCommand,
@@ -14,7 +19,7 @@ use crossterm::{
 use job::Job;
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::container::node::Node;
+use crate::{container::node::Node, error::LoadError};
 
 struct GlobalState {
     exit: bool,
@@ -24,6 +29,7 @@ pub struct CliApp {
     state: GlobalState,
     worktree_state: WorkTreeState,
     worktree: WorkSpace,
+    output_file_name: String,
     jobs: Vec<Job>,
 }
 
@@ -39,9 +45,10 @@ impl CliApp {
         });
 
         let mut cli_app = Self {
-            worktree: WorkSpace::new(Node::null(), output_file_name),
+            worktree: WorkSpace::new(Node::null()),
             worktree_state: WorkTreeState::default(),
             state: GlobalState { exit: false },
+            output_file_name,
             jobs: vec![initial_load_job],
         };
         cli_app.worktree.decrease_edit_cntr();
@@ -53,7 +60,6 @@ impl CliApp {
 
         self.worktree.handle_action(
             &mut self.worktree_state,
-            &mut terminal,
             &mut Actions::new(),
             NavigationAction::TogglePreview.into(),
         )?;
@@ -105,23 +111,67 @@ impl CliApp {
                 }
                 Action::Workspace(workspace_action) => self.worktree.handle_action(
                     &mut self.worktree_state,
-                    terminal,
                     &mut actions,
                     workspace_action,
                 )?,
                 Action::Load(node) => {
                     self.worktree.replace_selected(&self.worktree_state, node);
                 }
-                Action::RegisterJob(job) => {
-                    self.jobs.push(job);
-                }
+                Action::ExecuteJob(job) => self.jobs.push(self.execute_job(terminal, job)?),
             }
         }
 
         self.worktree.set_loading(!self.jobs.is_empty());
         Ok(())
     }
+
+    fn execute_job(&self, terminal: &mut Terminal, job: JobAction) -> std::io::Result<Job> {
+        let job = match job {
+            JobAction::Edit => {
+                terminal.run_editor(EDITOR_BUFFER)?;
+                Job::new(|| {
+                    let file = File::open(EDITOR_BUFFER)?;
+
+                    match Node::load(file) {
+                        Err(LoadError::IO(error)) => Err(error),
+                        Err(LoadError::SerdeJson(error)) => Ok(WorkSpaceAction::EditError(
+                            ConfirmAction::Request(error.to_string()),
+                        )
+                        .into()),
+                        Err(LoadError::DeserializationError(error)) => Ok(
+                            WorkSpaceAction::EditError(ConfirmAction::Request(error.to_string()))
+                                .into(),
+                        ),
+                        Ok(node) => Ok(Action::Load(node)),
+                    }
+                })
+            }
+            JobAction::Save => {
+                let mut output_file = File::create(&self.output_file_name)?;
+                let content: *const Node = self.worktree.file_root();
+                let content = NodeJob(content);
+                Job::new(move || {
+                    let _ = &content;
+                    let content =
+                        unsafe { content.0.as_ref().expect("invalid pointer to content") };
+                    output_file.write_all(
+                        content
+                            .to_string_pretty()
+                            .expect("invalid internal representation")
+                            .as_bytes(),
+                    )?;
+                    Ok(WorkSpaceAction::SaveDone.into())
+                })
+            }
+        };
+
+        Ok(job)
+    }
 }
+
+struct NodeJob(*const Node);
+unsafe impl Send for NodeJob {}
+unsafe impl Sync for NodeJob {}
 
 fn global_exit_handler(event: &Event) -> bool {
     let Some(key_event) = event.as_key_event() else {

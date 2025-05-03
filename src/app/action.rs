@@ -2,8 +2,6 @@ use std::collections::VecDeque;
 
 use crate::container::node::Node;
 
-use super::job::Job;
-
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum PreviewNavigationAction {
@@ -73,6 +71,19 @@ impl From<WorkSpaceAction> for Action {
     }
 }
 
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum JobAction {
+    Edit,
+    Save,
+}
+
+impl From<JobAction> for Action {
+    fn from(value: JobAction) -> Self {
+        Self::ExecuteJob(value)
+    }
+}
+
 #[must_use]
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -80,7 +91,7 @@ pub enum Action {
     Exit(ConfirmAction<()>),
     Workspace(WorkSpaceAction),
     Load(Node),
-    RegisterJob(Job),
+    ExecuteJob(JobAction),
 }
 
 pub struct Actions(VecDeque<Action>);
