@@ -1033,7 +1033,7 @@ mod test {
     }
 
     #[test]
-    fn render_navigation_far() {
+    fn render_navigation_far_test() {
         let json = include_str!("example.json");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
         let mut state = WorkSpaceState::default();
