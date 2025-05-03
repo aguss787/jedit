@@ -10,7 +10,9 @@ use std::{
     time::Duration,
 };
 
-use action::{Action, Actions, ConfirmAction, JobAction, NavigationAction, WorkSpaceAction};
+use action::{
+    Action, Actions, ConfirmAction, EditJobAction, JobAction, NavigationAction, WorkSpaceAction,
+};
 use component::workspace::{WorkSpace, WorkSpaceState};
 use crossterm::{
     ExecutableCommand,
@@ -129,16 +131,23 @@ impl CliApp {
 
     fn execute_job(&self, terminal: &mut Terminal, job: JobAction) -> std::io::Result<Option<Job>> {
         let job = match job {
-            JobAction::Edit => {
-                let mut file = File::create(EDITOR_BUFFER)?;
-                if !self
-                    .worktree
-                    .write_selected(&self.worktree_state, &mut file)?
-                {
+            JobAction::Edit(EditJobAction::Init) => {
+                let Some(node) = self.worktree.selected_node(&self.worktree_state) else {
                     return Ok(None);
                 };
-                drop(file);
-
+                let node = NodeJob(node);
+                Job::new(move || {
+                    let mut file = File::create(EDITOR_BUFFER)?;
+                    let _ = &node;
+                    let node = unsafe { node.0.as_ref().expect("invalid pointer to node") };
+                    let content = node
+                        .to_string_pretty()
+                        .expect("invalid internal representation");
+                    file.write_all(content.as_bytes())?;
+                    Ok(JobAction::Edit(EditJobAction::Open).into())
+                })
+            }
+            JobAction::Edit(EditJobAction::Open) => {
                 terminal.run_editor(EDITOR_BUFFER)?;
                 Job::new(|| {
                     let file = File::open(EDITOR_BUFFER)?;

@@ -83,8 +83,15 @@ impl From<WorkSpaceAction> for Action {
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
+pub enum EditJobAction {
+    Init,
+    Open,
+}
+
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq))]
 pub enum JobAction {
-    Edit,
+    Edit(EditJobAction),
     Save,
 }
 

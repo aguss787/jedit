@@ -19,7 +19,8 @@ use crate::{
     app::{
         Action, Actions,
         action::{
-            ConfirmAction, JobAction, NavigationAction, PreviewNavigationAction, WorkSpaceAction,
+            ConfirmAction, EditJobAction, JobAction, NavigationAction, PreviewNavigationAction,
+            WorkSpaceAction,
         },
         math::Op,
     },
@@ -183,10 +184,10 @@ impl WorkSpace {
             WorkSpaceAction::Navigation(navigation_action) => {
                 self.handle_navigation_action(state, navigation_action);
             }
-            WorkSpaceAction::Edit => actions.push(JobAction::Edit.into()),
+            WorkSpaceAction::Edit => actions.push(JobAction::Edit(EditJobAction::Init).into()),
             WorkSpaceAction::EditError(confirm_action) => {
                 if self.handle_edit_error_action(confirm_action) {
-                    actions.push(JobAction::Edit.into());
+                    actions.push(JobAction::Edit(EditJobAction::Open).into());
                 }
             }
             WorkSpaceAction::Save(confirm_action) => {
@@ -266,17 +267,10 @@ impl WorkSpace {
         !is_terminal
     }
 
-    pub fn write_selected(
-        &self,
-        worktree_state: &WorkSpaceState,
-        writer: impl Write,
-    ) -> std::io::Result<bool> {
-        let Some(index) = worktree_state.list_state.selected() else {
-            return Ok(false);
-        };
-        self.write_on_index(writer, index)?;
-
-        Ok(true)
+    pub fn selected_node(&self, worktree_state: &WorkSpaceState) -> Option<&Node> {
+        let index = worktree_state.list_state.selected()?;
+        let selector = self.work_tree_root.selector(index);
+        Some(self.file_root.subtree(&selector).expect("broken selector"))
     }
 
     fn write_on_index(&self, mut writer: impl Write, index: usize) -> Result<(), std::io::Error> {
@@ -291,7 +285,7 @@ impl WorkSpace {
         Ok(())
     }
 
-    pub fn replace_selected(&mut self, worktree_state: &WorkSpaceState, new_node: Node) {
+    fn replace_selected(&mut self, worktree_state: &WorkSpaceState, new_node: Node) {
         let Some(index) = worktree_state.list_state.selected() else {
             return;
         };
@@ -731,7 +725,7 @@ mod test {
                 &mut state,
                 WorkSpaceAction::EditError(ConfirmAction::Confirm(true))
             ),
-            vec![JobAction::Edit.into()]
+            vec![JobAction::Edit(EditJobAction::Open).into()]
         );
         assert!(worktree.dialogs.is_empty());
     }
@@ -1116,6 +1110,19 @@ mod test {
             let mut actions = Actions::new();
             self.handle_action(state, &mut actions, action).unwrap();
             actions.into_vec()
+        }
+
+        pub fn write_selected(
+            &self,
+            worktree_state: &WorkSpaceState,
+            writer: impl Write,
+        ) -> std::io::Result<bool> {
+            let Some(index) = worktree_state.list_state.selected() else {
+                return Ok(false);
+            };
+            self.write_on_index(writer, index)?;
+
+            Ok(true)
         }
     }
 }
