@@ -17,8 +17,8 @@ pub struct PreviewState {
 }
 
 enum Op {
-    Add,
-    Sub,
+    Add(u16),
+    Sub(u16),
 }
 
 const SCROLL_SIZE: u16 = 5;
@@ -27,28 +27,28 @@ impl Op {
     fn exec(self, num: u16) -> u16 {
         let num = num / SCROLL_SIZE;
         let num = match self {
-            Op::Add => num.saturating_add(1),
-            Op::Sub => num.saturating_sub(1),
+            Op::Add(n) => num.saturating_add(n),
+            Op::Sub(n) => num.saturating_sub(n),
         };
         num * SCROLL_SIZE
     }
 }
 
 impl PreviewState {
-    pub fn scroll_up(&mut self) {
-        self.y_offset = Op::Sub.exec(self.y_offset);
+    pub fn scroll_up(&mut self, n: u16) {
+        self.y_offset = Op::Sub(n).exec(self.y_offset);
     }
 
-    pub fn scroll_down(&mut self) {
-        self.y_offset = Op::Add.exec(self.y_offset);
+    pub fn scroll_down(&mut self, n: u16) {
+        self.y_offset = Op::Add(n).exec(self.y_offset);
     }
 
     pub fn scroll_left(&mut self) {
-        self.x_offset = Op::Sub.exec(self.x_offset);
+        self.x_offset = Op::Sub(1).exec(self.x_offset);
     }
 
     pub fn scroll_right(&mut self) {
-        self.x_offset = Op::Add.exec(self.x_offset);
+        self.x_offset = Op::Add(1).exec(self.x_offset);
     }
 }
 
@@ -261,8 +261,7 @@ mod test {
         assert_snapshot!(stateful_render_to_string(&preview, &mut preview_state));
 
         for i in 0..=8 {
-            preview_state.scroll_down();
-            preview_state.scroll_down();
+            preview_state.scroll_down(2);
             if i % 2 == 0 {
                 assert_snapshot!(stateful_render_to_string(&preview, &mut preview_state));
             }
@@ -271,7 +270,7 @@ mod test {
         preview_state.scroll_right();
         assert_snapshot!(stateful_render_to_string(&preview, &mut preview_state));
 
-        preview_state.scroll_up();
+        preview_state.scroll_up(1);
         assert_snapshot!(stateful_render_to_string(&preview, &mut preview_state));
 
         preview_state.scroll_left();

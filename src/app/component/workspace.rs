@@ -77,13 +77,19 @@ impl WorkSpace {
             return;
         };
 
-        if event.modifiers == KeyModifiers::ALT {
+        if event.modifiers == KeyModifiers::CONTROL {
             match event.code {
-                KeyCode::Char('k') | KeyCode::Up => {
+                KeyCode::Char('u') => {
                     actions.push(NavigationAction::Up(10).into());
                 }
-                KeyCode::Char('j') | KeyCode::Down => {
+                KeyCode::Char('d') => {
                     actions.push(NavigationAction::Down(10).into());
+                }
+                KeyCode::Char('U') => {
+                    actions.push(PreviewNavigationAction::Up(5).into());
+                }
+                KeyCode::Char('D') => {
+                    actions.push(PreviewNavigationAction::Down(5).into());
                 }
                 _ => {}
             }
@@ -119,10 +125,10 @@ impl WorkSpace {
                 actions.push(PreviewNavigationAction::Left.into());
             }
             KeyCode::Char('J') => {
-                actions.push(PreviewNavigationAction::Down.into());
+                actions.push(PreviewNavigationAction::Down(1).into());
             }
             KeyCode::Char('K') => {
-                actions.push(PreviewNavigationAction::Up.into());
+                actions.push(PreviewNavigationAction::Up(1).into());
             }
             KeyCode::Char('L') => {
                 actions.push(PreviewNavigationAction::Right.into());
@@ -224,8 +230,8 @@ impl WorkSpace {
                 self.toggle_preview(state);
             }
             NavigationAction::PreviewNavigation(preview_navigation) => match preview_navigation {
-                PreviewNavigationAction::Up => state.preview_state.scroll_up(),
-                PreviewNavigationAction::Down => state.preview_state.scroll_down(),
+                PreviewNavigationAction::Up(n) => state.preview_state.scroll_up(n),
+                PreviewNavigationAction::Down(n) => state.preview_state.scroll_down(n),
                 PreviewNavigationAction::Left => state.preview_state.scroll_left(),
                 PreviewNavigationAction::Right => state.preview_state.scroll_right(),
             },
@@ -499,7 +505,7 @@ mod test {
                 NavigationAction::Up(1),
             ),
             (
-                (KeyCode::Char('k'), KeyModifiers::ALT),
+                (KeyCode::Char('u'), KeyModifiers::CONTROL),
                 NavigationAction::Up(10),
             ),
             (
@@ -507,15 +513,11 @@ mod test {
                 NavigationAction::Down(1),
             ),
             (
-                (KeyCode::Down, KeyModifiers::ALT),
-                NavigationAction::Down(10),
-            ),
-            (
                 (KeyCode::Char('j'), KeyModifiers::NONE),
                 NavigationAction::Down(1),
             ),
             (
-                (KeyCode::Char('j'), KeyModifiers::ALT),
+                (KeyCode::Char('d'), KeyModifiers::CONTROL),
                 NavigationAction::Down(10),
             ),
             (
@@ -540,11 +542,19 @@ mod test {
             ),
             (
                 (KeyCode::Char('K'), KeyModifiers::NONE),
-                NavigationAction::PreviewNavigation(PreviewNavigationAction::Up),
+                NavigationAction::PreviewNavigation(PreviewNavigationAction::Up(1)),
             ),
             (
                 (KeyCode::Char('J'), KeyModifiers::NONE),
-                NavigationAction::PreviewNavigation(PreviewNavigationAction::Down),
+                NavigationAction::PreviewNavigation(PreviewNavigationAction::Down(1)),
+            ),
+            (
+                (KeyCode::Char('U'), KeyModifiers::CONTROL),
+                NavigationAction::PreviewNavigation(PreviewNavigationAction::Up(5)),
+            ),
+            (
+                (KeyCode::Char('D'), KeyModifiers::CONTROL),
+                NavigationAction::PreviewNavigation(PreviewNavigationAction::Down(5)),
             ),
             (
                 (KeyCode::Char('H'), KeyModifiers::NONE),
@@ -886,13 +896,34 @@ mod test {
         }
 
         for action in [
-            PreviewNavigationAction::Up,
-            PreviewNavigationAction::Down,
-            PreviewNavigationAction::Down,
-            PreviewNavigationAction::Up,
+            PreviewNavigationAction::Up(1),
+            PreviewNavigationAction::Down(1),
+            PreviewNavigationAction::Down(1),
+            PreviewNavigationAction::Up(1),
             PreviewNavigationAction::Right,
             PreviewNavigationAction::Right,
             PreviewNavigationAction::Left,
+        ] {
+            worktree.test_action(&mut state, action.into());
+            assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+        }
+    }
+
+    #[test]
+    fn render_preview_overflow_scroll_test() {
+        let json = include_str!("example.json");
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkSpaceState::default();
+
+        for action in [NavigationAction::TogglePreview, NavigationAction::Expand] {
+            worktree.test_action(&mut state, action.into());
+        }
+
+        for action in [
+            PreviewNavigationAction::Down(3),
+            PreviewNavigationAction::Down(100),
+            PreviewNavigationAction::Up(3),
+            PreviewNavigationAction::Up(100),
         ] {
             worktree.test_action(&mut state, action.into());
             assert_snapshot!(stateful_render_to_string(&worktree, &mut state));

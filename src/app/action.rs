@@ -5,8 +5,8 @@ use crate::container::node::Node;
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum PreviewNavigationAction {
-    Up,
-    Down,
+    Up(u16),
+    Down(u16),
     Left,
     Right,
 }
