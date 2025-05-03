@@ -2,7 +2,7 @@ mod worktree_node;
 
 use std::io::Write;
 
-use crossterm::event::{Event, KeyCode};
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Layout},
     prelude::{Buffer, Rect},
@@ -77,12 +77,25 @@ impl WorkSpace {
             return;
         };
 
+        if event.modifiers == KeyModifiers::ALT {
+            match event.code {
+                KeyCode::Char('k') | KeyCode::Up => {
+                    actions.push(NavigationAction::Up(10).into());
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    actions.push(NavigationAction::Down(10).into());
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match event.code {
             KeyCode::Char('k') | KeyCode::Up => {
-                actions.push(NavigationAction::Up.into());
+                actions.push(NavigationAction::Up(1).into());
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                actions.push(NavigationAction::Down.into());
+                actions.push(NavigationAction::Down(1).into());
             }
             KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ') => {
                 actions.push(NavigationAction::Expand.into());
@@ -181,19 +194,18 @@ impl WorkSpace {
     ) {
         let prev_index = state.list_state.selected();
         match navigation_action {
-            NavigationAction::Up => {
-                if state.list_state.selected().is_some_and(|index| index > 0) {
-                    state.list_state.select_previous();
-                }
+            NavigationAction::Up(n) => {
+                let index = state.list_state.selected().unwrap().saturating_sub(n);
+                state.list_state.select(Some(index));
             }
-            NavigationAction::Down => {
-                if state
+            NavigationAction::Down(n) => {
+                let index = state
                     .list_state
                     .selected()
-                    .is_some_and(|index| index + 1 < self.work_tree_root.len())
-                {
-                    state.list_state.select_next();
-                }
+                    .unwrap()
+                    .saturating_add(n)
+                    .min(self.work_tree_root.len().saturating_sub(1));
+                state.list_state.select(Some(index));
             }
             NavigationAction::Expand => {
                 if let Some(index) = state.list_state.selected() {
@@ -481,29 +493,65 @@ mod test {
         let worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
 
         for (key, action) in [
-            (KeyCode::Up, NavigationAction::Up),
-            (KeyCode::Char('k'), NavigationAction::Up),
-            (KeyCode::Down, NavigationAction::Down),
-            (KeyCode::Char('j'), NavigationAction::Down),
-            (KeyCode::Enter, NavigationAction::Expand),
-            (KeyCode::Char('l'), NavigationAction::Expand),
-            (KeyCode::Char(' '), NavigationAction::Expand),
-            (KeyCode::Char('h'), NavigationAction::Close),
-            (KeyCode::Char('p'), NavigationAction::TogglePreview),
+            ((KeyCode::Up, KeyModifiers::NONE), NavigationAction::Up(1)),
             (
-                KeyCode::Char('K'),
+                (KeyCode::Char('k'), KeyModifiers::NONE),
+                NavigationAction::Up(1),
+            ),
+            (
+                (KeyCode::Char('k'), KeyModifiers::ALT),
+                NavigationAction::Up(10),
+            ),
+            (
+                (KeyCode::Down, KeyModifiers::NONE),
+                NavigationAction::Down(1),
+            ),
+            (
+                (KeyCode::Down, KeyModifiers::ALT),
+                NavigationAction::Down(10),
+            ),
+            (
+                (KeyCode::Char('j'), KeyModifiers::NONE),
+                NavigationAction::Down(1),
+            ),
+            (
+                (KeyCode::Char('j'), KeyModifiers::ALT),
+                NavigationAction::Down(10),
+            ),
+            (
+                (KeyCode::Enter, KeyModifiers::NONE),
+                NavigationAction::Expand,
+            ),
+            (
+                (KeyCode::Char('l'), KeyModifiers::NONE),
+                NavigationAction::Expand,
+            ),
+            (
+                (KeyCode::Char(' '), KeyModifiers::NONE),
+                NavigationAction::Expand,
+            ),
+            (
+                (KeyCode::Char('h'), KeyModifiers::NONE),
+                NavigationAction::Close,
+            ),
+            (
+                (KeyCode::Char('p'), KeyModifiers::NONE),
+                NavigationAction::TogglePreview,
+            ),
+            (
+                (KeyCode::Char('K'), KeyModifiers::NONE),
                 NavigationAction::PreviewNavigation(PreviewNavigationAction::Up),
             ),
             (
-                KeyCode::Char('J'),
+                (KeyCode::Char('J'), KeyModifiers::NONE),
                 NavigationAction::PreviewNavigation(PreviewNavigationAction::Down),
             ),
             (
-                KeyCode::Char('H'),
+                (KeyCode::Char('H'), KeyModifiers::NONE),
                 NavigationAction::PreviewNavigation(PreviewNavigationAction::Left),
             ),
             (
-                KeyCode::Char('L'),
+                (KeyCode::Char('L'), KeyModifiers::NONE),
                 NavigationAction::PreviewNavigation(PreviewNavigationAction::Right),
             ),
         ] {
@@ -517,10 +565,16 @@ mod test {
         let worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
 
         for (key, action) in [
-            (KeyCode::Char('q'), Action::Exit(ConfirmAction::Request(()))),
-            (KeyCode::Char('e'), WorkSpaceAction::Edit.into()),
             (
-                KeyCode::Char('w'),
+                (KeyCode::Char('q'), KeyModifiers::NONE),
+                Action::Exit(ConfirmAction::Request(())),
+            ),
+            (
+                (KeyCode::Char('e'), KeyModifiers::NONE),
+                WorkSpaceAction::Edit.into(),
+            ),
+            (
+                (KeyCode::Char('w'), KeyModifiers::NONE),
                 WorkSpaceAction::Save(ConfirmAction::Request(())).into(),
             ),
         ] {
@@ -539,11 +593,11 @@ mod test {
         );
 
         for key in [
-            KeyCode::Char('q'),
-            KeyCode::Char('e'),
-            KeyCode::Char('w'),
-            KeyCode::Char('k'),
-            KeyCode::Up,
+            (KeyCode::Char('q'), KeyModifiers::NONE),
+            (KeyCode::Char('e'), KeyModifiers::NONE),
+            (KeyCode::Char('w'), KeyModifiers::NONE),
+            (KeyCode::Char('k'), KeyModifiers::NONE),
+            (KeyCode::Up, KeyModifiers::NONE),
         ] {
             assert_key_event_to_action(&worktree, key, Vec::new());
         }
@@ -552,7 +606,11 @@ mod test {
             &mut state,
             WorkSpaceAction::Save(ConfirmAction::Confirm(false)),
         );
-        assert_key_event_to_action(&worktree, KeyCode::Up, vec![NavigationAction::Up.into()]);
+        assert_key_event_to_action(
+            &worktree,
+            (KeyCode::Up, KeyModifiers::NONE),
+            vec![NavigationAction::Up(1).into()],
+        );
     }
 
     #[test]
@@ -563,12 +621,12 @@ mod test {
         worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.test_action(&mut state, NavigationAction::Down.into());
+        worktree.test_action(&mut state, NavigationAction::Down(1).into());
         worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
         for _ in 0..3 {
-            worktree.test_action(&mut state, NavigationAction::Up.into());
+            worktree.test_action(&mut state, NavigationAction::Up(1).into());
         }
         worktree.test_action(&mut state, NavigationAction::Close.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
@@ -581,9 +639,9 @@ mod test {
         let mut state = WorkSpaceState::default();
         worktree.test_action(&mut state, NavigationAction::Expand.into());
 
-        worktree.test_action(&mut state, NavigationAction::Down.into());
+        worktree.test_action(&mut state, NavigationAction::Down(1).into());
         worktree.test_action(&mut state, NavigationAction::Expand.into());
-        worktree.test_action(&mut state, NavigationAction::Up.into());
+        worktree.test_action(&mut state, NavigationAction::Up(1).into());
 
         let mut buffer = Vec::new();
         worktree.write_selected(&state, &mut buffer).unwrap();
@@ -597,9 +655,9 @@ mod test {
         let mut state = WorkSpaceState::default();
         worktree.test_action(&mut state, NavigationAction::Expand.into());
 
-        worktree.test_action(&mut state, NavigationAction::Down.into());
+        worktree.test_action(&mut state, NavigationAction::Down(1).into());
         worktree.test_action(&mut state, NavigationAction::Expand.into());
-        worktree.test_action(&mut state, NavigationAction::Up.into());
+        worktree.test_action(&mut state, NavigationAction::Up(1).into());
 
         worktree.test_action(
             &mut state,
@@ -659,7 +717,7 @@ mod test {
         );
         assert_key_event_to_action(
             &worktree,
-            KeyCode::Char('y'),
+            (KeyCode::Char('y'), KeyModifiers::NONE),
             vec![WorkSpaceAction::EditError(ConfirmAction::Confirm(true)).into()],
         );
     }
@@ -786,7 +844,7 @@ mod test {
         worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.test_action(&mut state, NavigationAction::Down.into());
+        worktree.test_action(&mut state, NavigationAction::Down(1).into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
         worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
@@ -805,11 +863,11 @@ mod test {
 
         for action in [
             NavigationAction::TogglePreview,
-            NavigationAction::Up,
+            NavigationAction::Up(1),
             NavigationAction::Expand,
-            NavigationAction::Down,
-            NavigationAction::Down,
-            NavigationAction::Up,
+            NavigationAction::Down(1),
+            NavigationAction::Down(1),
+            NavigationAction::Up(1),
         ] {
             worktree.test_action(&mut state, action.into());
         }
@@ -916,20 +974,41 @@ mod test {
         worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.test_action(&mut state, NavigationAction::Up.into());
+        worktree.test_action(&mut state, NavigationAction::Up(1).into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_navigation_far() {
+        let json = include_str!("example.json");
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Down(2).into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Down(10).into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+        worktree.test_action(&mut state, NavigationAction::Down(100).into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+        worktree.test_action(&mut state, NavigationAction::Up(100).into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
     fn assert_key_event_to_action(
         worktree: &WorkSpace,
-        code: KeyCode,
+        (code, modifiers): (KeyCode, KeyModifiers),
         expected_actions: Vec<Action>,
     ) {
         assert_event_to_action(
             worktree,
             Event::Key(KeyEvent {
                 code,
-                modifiers: KeyModifiers::empty(),
+                modifiers,
                 kind: KeyEventKind::Press,
                 state: KeyEventState::NONE,
             }),

@@ -26,8 +26,8 @@ impl From<PreviewNavigationAction> for WorkSpaceAction {
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone, Copy))]
 pub enum NavigationAction {
-    Up,
-    Down,
+    Up(usize),
+    Down(usize),
     Expand,
     Close,
     TogglePreview,
