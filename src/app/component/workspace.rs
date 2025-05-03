@@ -21,6 +21,7 @@ use crate::{
         action::{
             ConfirmAction, JobAction, NavigationAction, PreviewNavigationAction, WorkSpaceAction,
         },
+        math::Op,
     },
     container::node::{Index, IndexKind, Node, NodeMeta},
 };
@@ -40,6 +41,7 @@ pub struct WorkSpace {
     list: List<'static>,
     dialogs: Vec<ConfirmDialog>,
     preview: Option<Preview>,
+    preview_pct: u16,
     loading: Option<Loading>,
 }
 
@@ -55,6 +57,7 @@ impl WorkSpace {
             list,
             dialogs: Vec::new(),
             preview: None,
+            preview_pct: 65,
             loading: None,
         }
     }
@@ -90,6 +93,12 @@ impl WorkSpace {
                 }
                 KeyCode::Char('D') => {
                     actions.push(PreviewNavigationAction::Down(5).into());
+                }
+                KeyCode::Left => {
+                    actions.push(NavigationAction::PreviewWindowResize(Op::Add(1)).into());
+                }
+                KeyCode::Right => {
+                    actions.push(NavigationAction::PreviewWindowResize(Op::Sub(1)).into());
                 }
                 _ => {}
             }
@@ -164,7 +173,7 @@ impl WorkSpace {
         }
     }
 
-    pub fn handle_action(
+    pub(crate) fn handle_action(
         &mut self,
         state: &mut WorkSpaceState,
         actions: &mut Actions,
@@ -235,6 +244,9 @@ impl WorkSpace {
                 PreviewNavigationAction::Left => state.preview_state.scroll_left(),
                 PreviewNavigationAction::Right => state.preview_state.scroll_right(),
             },
+            NavigationAction::PreviewWindowResize(delta) => {
+                self.preview_pct = delta.exec(self.preview_pct).clamp(20, 80)
+            }
         }
 
         if self.preview.is_some() && prev_index != state.list_state.selected() {
@@ -421,7 +433,10 @@ impl StatefulWidget for &WorkSpace {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         if let Some(preview) = &self.preview {
-            let layout = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(2)]);
+            let layout = Layout::horizontal([
+                Constraint::Percentage(100 - self.preview_pct),
+                Constraint::Fill(self.preview_pct),
+            ]);
             let [tree_area, preview_area] = layout.areas(area);
 
             self.render_tree(tree_area, buf, state);
@@ -563,6 +578,14 @@ mod test {
             (
                 (KeyCode::Char('L'), KeyModifiers::NONE),
                 NavigationAction::PreviewNavigation(PreviewNavigationAction::Right),
+            ),
+            (
+                (KeyCode::Left, KeyModifiers::CONTROL),
+                NavigationAction::PreviewWindowResize(Op::Add(1)),
+            ),
+            (
+                (KeyCode::Right, KeyModifiers::CONTROL),
+                NavigationAction::PreviewWindowResize(Op::Sub(1)),
             ),
         ] {
             assert_key_event_to_action(&worktree, key, vec![action.into()]);
@@ -1027,6 +1050,37 @@ mod test {
         worktree.test_action(&mut state, NavigationAction::Down(100).into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
         worktree.test_action(&mut state, NavigationAction::Up(100).into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_preview_resize_test() {
+        let json = include_str!("example.json");
+        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+        worktree.test_action(
+            &mut state,
+            NavigationAction::PreviewWindowResize(Op::Sub(1)).into(),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+        worktree.test_action(
+            &mut state,
+            NavigationAction::PreviewWindowResize(Op::Add(3)).into(),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+        worktree.test_action(
+            &mut state,
+            NavigationAction::PreviewWindowResize(Op::Sub(100)).into(),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+        worktree.test_action(
+            &mut state,
+            NavigationAction::PreviewWindowResize(Op::Add(100)).into(),
+        );
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 

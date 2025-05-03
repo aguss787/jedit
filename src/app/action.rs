@@ -2,6 +2,8 @@ use std::collections::VecDeque;
 
 use crate::container::node::Node;
 
+use super::math::Op;
+
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum PreviewNavigationAction {
@@ -32,6 +34,7 @@ pub enum NavigationAction {
     Close,
     TogglePreview,
     PreviewNavigation(PreviewNavigationAction),
+    PreviewWindowResize(Op),
 }
 
 impl From<NavigationAction> for Action {
@@ -54,7 +57,7 @@ pub enum ConfirmAction<T> {
 }
 
 impl<T> ConfirmAction<T> {
-    pub fn action_confirmer<R: Into<Action>>(
+    pub(crate) fn action_confirmer<R: Into<Action>>(
         f: impl Fn(ConfirmAction<T>) -> R,
     ) -> impl Fn(bool) -> Action {
         move |b| f(ConfirmAction::Confirm(b)).into()
@@ -63,7 +66,7 @@ impl<T> ConfirmAction<T> {
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone))]
-pub enum WorkSpaceAction {
+pub(crate) enum WorkSpaceAction {
     Navigation(NavigationAction),
     Edit,
     EditError(ConfirmAction<String>),
@@ -94,7 +97,7 @@ impl From<JobAction> for Action {
 #[must_use]
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
-pub enum Action {
+pub(crate) enum Action {
     Exit(ConfirmAction<()>),
     Workspace(WorkSpaceAction),
     ExecuteJob(JobAction),
@@ -107,16 +110,16 @@ impl Actions {
         Self(VecDeque::new())
     }
 
-    pub fn push(&mut self, action: Action) {
+    pub(crate) fn push(&mut self, action: Action) {
         self.0.push_back(action);
     }
 
-    pub fn next(&mut self) -> Option<Action> {
+    pub(crate) fn next(&mut self) -> Option<Action> {
         self.0.pop_front()
     }
 
     #[cfg(test)]
-    pub fn into_vec(self) -> Vec<Action> {
+    pub(crate) fn into_vec(self) -> Vec<Action> {
         self.0.into_iter().collect()
     }
 }

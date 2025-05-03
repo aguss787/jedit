@@ -16,7 +16,7 @@ pub struct ConfirmDialog {
 }
 
 impl ConfirmDialog {
-    pub fn new(message: Text<'static>, response_fn: Box<dyn Fn(bool) -> Action>) -> Self {
+    pub(crate) fn new(message: Text<'static>, response_fn: Box<dyn Fn(bool) -> Action>) -> Self {
         Self {
             message,
             title: None,

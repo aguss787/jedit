@@ -8,30 +8,14 @@ use ratatui::{
     },
 };
 
+use crate::app::math::Op;
+
 use super::scrollbar::scrollbar;
 
 #[derive(Debug, Default)]
 pub struct PreviewState {
     x_offset: u16,
     y_offset: u16,
-}
-
-enum Op {
-    Add(u16),
-    Sub(u16),
-}
-
-const SCROLL_SIZE: u16 = 5;
-
-impl Op {
-    fn exec(self, num: u16) -> u16 {
-        let num = num / SCROLL_SIZE;
-        let num = match self {
-            Op::Add(n) => num.saturating_add(n),
-            Op::Sub(n) => num.saturating_sub(n),
-        };
-        num * SCROLL_SIZE
-    }
 }
 
 impl PreviewState {
