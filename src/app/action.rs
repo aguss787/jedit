@@ -17,6 +17,12 @@ impl From<PreviewNavigationAction> for Action {
     }
 }
 
+impl From<PreviewNavigationAction> for WorkSpaceAction {
+    fn from(value: PreviewNavigationAction) -> Self {
+        NavigationAction::PreviewNavigation(value).into()
+    }
+}
+
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone, Copy))]
 pub enum NavigationAction {
@@ -56,13 +62,14 @@ impl<T> ConfirmAction<T> {
 }
 
 #[derive(Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(test, derive(PartialEq, Clone))]
 pub enum WorkSpaceAction {
     Navigation(NavigationAction),
     Edit,
     EditError(ConfirmAction<String>),
     Save(ConfirmAction<()>),
     SaveDone,
+    Load(Node),
 }
 
 impl From<WorkSpaceAction> for Action {
@@ -90,7 +97,6 @@ impl From<JobAction> for Action {
 pub enum Action {
     Exit(ConfirmAction<()>),
     Workspace(WorkSpaceAction),
-    Load(Node),
     ExecuteJob(JobAction),
 }
 

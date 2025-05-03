@@ -10,7 +10,7 @@ use std::{
 };
 
 use action::{Action, Actions, ConfirmAction, JobAction, NavigationAction, WorkSpaceAction};
-use component::workspace::{WorkSpace, WorkTreeState};
+use component::workspace::{WorkSpace, WorkSpaceState};
 use crossterm::{
     ExecutableCommand,
     event::{self, Event, KeyCode},
@@ -27,7 +27,7 @@ struct GlobalState {
 
 pub struct CliApp {
     state: GlobalState,
-    worktree_state: WorkTreeState,
+    worktree_state: WorkSpaceState,
     worktree: WorkSpace,
     output_file_name: String,
     jobs: Vec<Job>,
@@ -41,12 +41,12 @@ impl CliApp {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
             })?;
 
-            Ok(Action::Load(file_root))
+            Ok(WorkSpaceAction::Load(file_root).into())
         });
 
         let mut cli_app = Self {
             worktree: WorkSpace::new(Node::null()),
-            worktree_state: WorkTreeState::default(),
+            worktree_state: WorkSpaceState::default(),
             state: GlobalState { exit: false },
             output_file_name,
             jobs: vec![initial_load_job],
@@ -114,10 +114,11 @@ impl CliApp {
                     &mut actions,
                     workspace_action,
                 )?,
-                Action::Load(node) => {
-                    self.worktree.replace_selected(&self.worktree_state, node);
+                Action::ExecuteJob(job) => {
+                    if let Some(job) = self.execute_job(terminal, job)? {
+                        self.jobs.push(job);
+                    }
                 }
-                Action::ExecuteJob(job) => self.jobs.push(self.execute_job(terminal, job)?),
             }
         }
 
@@ -125,9 +126,18 @@ impl CliApp {
         Ok(())
     }
 
-    fn execute_job(&self, terminal: &mut Terminal, job: JobAction) -> std::io::Result<Job> {
+    fn execute_job(&self, terminal: &mut Terminal, job: JobAction) -> std::io::Result<Option<Job>> {
         let job = match job {
             JobAction::Edit => {
+                let mut file = File::create(EDITOR_BUFFER)?;
+                if !self
+                    .worktree
+                    .write_selected(&self.worktree_state, &mut file)?
+                {
+                    return Ok(None);
+                };
+                drop(file);
+
                 terminal.run_editor(EDITOR_BUFFER)?;
                 Job::new(|| {
                     let file = File::open(EDITOR_BUFFER)?;
@@ -142,7 +152,7 @@ impl CliApp {
                             WorkSpaceAction::EditError(ConfirmAction::Request(error.to_string()))
                                 .into(),
                         ),
-                        Ok(node) => Ok(Action::Load(node)),
+                        Ok(node) => Ok(WorkSpaceAction::Load(node).into()),
                     }
                 })
             }
@@ -165,7 +175,7 @@ impl CliApp {
             }
         };
 
-        Ok(job)
+        Ok(Some(job))
     }
 }
 

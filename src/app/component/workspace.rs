@@ -1,6 +1,6 @@
 mod worktree_node;
 
-use std::{fs::File, io::Write};
+use std::io::Write;
 
 use crossterm::event::{Event, KeyCode};
 use ratatui::{
@@ -17,7 +17,7 @@ use worktree_node::WorkTreeNode;
 
 use crate::{
     app::{
-        Action, Actions, EDITOR_BUFFER,
+        Action, Actions,
         action::{
             ConfirmAction, JobAction, NavigationAction, PreviewNavigationAction, WorkSpaceAction,
         },
@@ -147,7 +147,7 @@ impl WorkSpace {
 
     pub fn handle_action(
         &mut self,
-        state: &mut WorkTreeState,
+        state: &mut WorkSpaceState,
         actions: &mut Actions,
         action: WorkSpaceAction,
     ) -> std::io::Result<()> {
@@ -155,14 +155,7 @@ impl WorkSpace {
             WorkSpaceAction::Navigation(navigation_action) => {
                 self.handle_navigation_action(state, navigation_action);
             }
-            WorkSpaceAction::Edit => {
-                let mut file = File::create(EDITOR_BUFFER)?;
-                if !self.write_selected(state, &mut file)? {
-                    return Ok(());
-                };
-                drop(file);
-                actions.push(JobAction::Edit.into());
-            }
+            WorkSpaceAction::Edit => actions.push(JobAction::Edit.into()),
             WorkSpaceAction::EditError(confirm_action) => {
                 if self.handle_edit_error_action(confirm_action) {
                     actions.push(JobAction::Edit.into());
@@ -174,9 +167,8 @@ impl WorkSpace {
                     actions.push(action);
                 }
             }
-            WorkSpaceAction::SaveDone => {
-                self.handle_save_done();
-            }
+            WorkSpaceAction::SaveDone => self.handle_save_done(),
+            WorkSpaceAction::Load(node) => self.replace_selected(state, node),
         }
 
         Ok(())
@@ -184,7 +176,7 @@ impl WorkSpace {
 
     fn handle_navigation_action(
         &mut self,
-        state: &mut WorkTreeState,
+        state: &mut WorkSpaceState,
         navigation_action: NavigationAction,
     ) {
         let prev_index = state.list_state.selected();
@@ -244,9 +236,9 @@ impl WorkSpace {
         !is_terminal
     }
 
-    fn write_selected(
+    pub fn write_selected(
         &self,
-        worktree_state: &WorkTreeState,
+        worktree_state: &WorkSpaceState,
         writer: impl Write,
     ) -> std::io::Result<bool> {
         let Some(index) = worktree_state.list_state.selected() else {
@@ -269,7 +261,7 @@ impl WorkSpace {
         Ok(())
     }
 
-    pub fn replace_selected(&mut self, worktree_state: &WorkTreeState, new_node: Node) {
+    pub fn replace_selected(&mut self, worktree_state: &WorkSpaceState, new_node: Node) {
         let Some(index) = worktree_state.list_state.selected() else {
             return;
         };
@@ -292,7 +284,7 @@ impl WorkSpace {
         self.list = new_list(&self.work_tree_root);
     }
 
-    fn toggle_preview(&mut self, state: &WorkTreeState) {
+    fn toggle_preview(&mut self, state: &WorkSpaceState) {
         if self.preview.is_some() {
             self.preview = None;
             return;
@@ -301,7 +293,7 @@ impl WorkSpace {
         self.set_preview_to_selected(state);
     }
 
-    fn set_preview_to_selected(&mut self, state: &WorkTreeState) {
+    fn set_preview_to_selected(&mut self, state: &WorkSpaceState) {
         let Some(index) = state.list_state.selected() else {
             return;
         };
@@ -390,12 +382,12 @@ impl WorkSpace {
 }
 
 #[derive(Debug)]
-pub struct WorkTreeState {
+pub struct WorkSpaceState {
     list_state: ListState,
     preview_state: PreviewState,
 }
 
-impl Default for WorkTreeState {
+impl Default for WorkSpaceState {
     fn default() -> Self {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
@@ -407,7 +399,7 @@ impl Default for WorkTreeState {
 }
 
 impl StatefulWidget for &WorkSpace {
-    type State = WorkTreeState;
+    type State = WorkSpaceState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         if let Some(preview) = &self.preview {
@@ -431,7 +423,7 @@ impl StatefulWidget for &WorkSpace {
 }
 
 impl WorkSpace {
-    fn render_tree(&self, area: Rect, buf: &mut Buffer, state: &mut WorkTreeState) {
+    fn render_tree(&self, area: Rect, buf: &mut Buffer, state: &mut WorkSpaceState) {
         let block = Block::bordered().title("Tree");
         let inner_area = block.inner(area);
 
@@ -540,9 +532,11 @@ mod test {
     fn event_handler_ignore_on_confirm_dialog() {
         let json = String::from("123");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        worktree
-            .handle_save_action(ConfirmAction::Request(()))
-            .unwrap();
+        let mut state = WorkSpaceState::default();
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Save(ConfirmAction::Request(())),
+        );
 
         for key in [
             KeyCode::Char('q'),
@@ -554,9 +548,10 @@ mod test {
             assert_key_event_to_action(&worktree, key, Vec::new());
         }
 
-        worktree
-            .handle_save_action(ConfirmAction::Confirm(false))
-            .unwrap();
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Save(ConfirmAction::Confirm(false)),
+        );
         assert_key_event_to_action(&worktree, KeyCode::Up, vec![NavigationAction::Up.into()]);
     }
 
@@ -564,18 +559,18 @@ mod test {
     fn handle_navigation_action() {
         let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
-        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
+        let mut state = WorkSpaceState::default();
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::Down);
-        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
+        worktree.test_action(&mut state, NavigationAction::Down.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
         for _ in 0..3 {
-            worktree.handle_navigation_action(&mut state, NavigationAction::Up);
+            worktree.test_action(&mut state, NavigationAction::Up.into());
         }
-        worktree.handle_navigation_action(&mut state, NavigationAction::Close);
+        worktree.test_action(&mut state, NavigationAction::Close.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
@@ -583,12 +578,12 @@ mod test {
     fn write_selected_test() {
         let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
-        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
+        let mut state = WorkSpaceState::default();
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::Down);
-        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
-        worktree.handle_navigation_action(&mut state, NavigationAction::Up);
+        worktree.test_action(&mut state, NavigationAction::Down.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Up.into());
 
         let mut buffer = Vec::new();
         worktree.write_selected(&state, &mut buffer).unwrap();
@@ -599,14 +594,17 @@ mod test {
     fn load_selected_test() {
         let json = String::from(r#"{"key": "string", "values": [1, 2, 3]}"#);
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
-        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
+        let mut state = WorkSpaceState::default();
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::Down);
-        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
-        worktree.handle_navigation_action(&mut state, NavigationAction::Up);
+        worktree.test_action(&mut state, NavigationAction::Down.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Up.into());
 
-        worktree.replace_selected(&state, Node::load("[{}, 5]".as_bytes()).unwrap());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Load(Node::load("[{}, 5]".as_bytes()).unwrap()),
+        );
 
         assert_eq!(
             worktree.file_root().to_string_pretty().unwrap(),
@@ -618,15 +616,32 @@ mod test {
     fn handle_edit_error_action_test() {
         let json = String::from("123");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkSpaceState::default();
 
-        assert!(!worktree.handle_edit_error_action(ConfirmAction::Request(String::from("error"))));
+        let action = WorkSpaceAction::EditError(ConfirmAction::Request(String::from(
+            "Deserialization error: expected value at line 1 column 2",
+        )));
+        assert!(worktree.test_action(&mut state, action.clone()).is_empty());
         assert_eq!(worktree.dialogs.len(), 1);
-        assert!(!worktree.handle_edit_error_action(ConfirmAction::Confirm(false)));
+        assert!(
+            worktree
+                .test_action(
+                    &mut state,
+                    WorkSpaceAction::EditError(ConfirmAction::Confirm(false))
+                )
+                .is_empty()
+        );
         assert!(worktree.dialogs.is_empty());
 
-        assert!(!worktree.handle_edit_error_action(ConfirmAction::Request(String::from("error"))));
+        assert!(worktree.test_action(&mut state, action.clone()).is_empty());
         assert_eq!(worktree.dialogs.len(), 1);
-        assert!(worktree.handle_edit_error_action(ConfirmAction::Confirm(true)));
+        assert_eq!(
+            worktree.test_action(
+                &mut state,
+                WorkSpaceAction::EditError(ConfirmAction::Confirm(true))
+            ),
+            vec![JobAction::Edit.into()]
+        );
         assert!(worktree.dialogs.is_empty());
     }
 
@@ -634,8 +649,14 @@ mod test {
     fn event_handler_dialog_test() {
         let json = String::from("123");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkSpaceState::default();
 
-        worktree.handle_edit_error_action(ConfirmAction::Request(String::from("error")));
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::EditError(ConfirmAction::Request(String::from(
+                "Deserialization error: expected value at line 1 column 2",
+            ))),
+        );
         assert_key_event_to_action(
             &worktree,
             KeyCode::Char('y'),
@@ -647,22 +668,26 @@ mod test {
     fn render_edit_error_test() {
         let json = String::from("123");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkSpaceState::default();
 
         for response in [true, false] {
-            worktree.handle_edit_error_action(ConfirmAction::Request(String::from(
-                "Deserialization error: expected value at line 1 column 2",
-            )));
+            worktree.test_action(
+                &mut state,
+                WorkSpaceAction::EditError(ConfirmAction::Request(String::from(
+                    "Deserialization error: expected value at line 1 column 2",
+                ))),
+            );
             if response {
                 assert_snapshot!(stateful_render_to_string(
                     &worktree,
-                    &mut WorkTreeState::default()
+                    &mut WorkSpaceState::default()
                 ));
             }
 
             worktree.handle_edit_error_action(ConfirmAction::Confirm(response));
             assert_snapshot!(stateful_render_to_string(
                 &worktree,
-                &mut WorkTreeState::default()
+                &mut WorkSpaceState::default()
             ));
         }
     }
@@ -671,18 +696,19 @@ mod test {
     fn render_edit_error_long_message_test() {
         let json = String::from("123");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
+        let mut state = WorkSpaceState::default();
 
-        worktree.handle_edit_error_action(ConfirmAction::Request(String::from(
+        worktree.test_action(&mut state, WorkSpaceAction::EditError(ConfirmAction::Request(String::from(
             concat!(
                 "Deserialization error: expected value at line 1 column 2. Lorem ipsum dolor sit amet,",
                 "consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna",
                 "aliqua.",
             )
-        )));
+        ))));
 
         assert_snapshot!(stateful_render_to_string(
             &worktree,
-            &mut WorkTreeState::default()
+            &mut WorkSpaceState::default()
         ));
     }
 
@@ -692,16 +718,25 @@ mod test {
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
         assert!(worktree.maybe_exit(ConfirmAction::Request(())));
 
-        let state = WorkTreeState::default();
-        worktree.replace_selected(&state, Node::load(String::from("456").as_bytes()).unwrap());
+        let mut state = WorkSpaceState::default();
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Load(Node::load(String::from("456").as_bytes()).unwrap()),
+        );
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
         assert!(!worktree.maybe_exit(ConfirmAction::Confirm(false)));
 
-        worktree.replace_selected(&state, Node::load(String::from("123").as_bytes()).unwrap());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Load(Node::load(String::from("123").as_bytes()).unwrap()),
+        );
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
         assert!(worktree.maybe_exit(ConfirmAction::Confirm(true)));
 
-        worktree.replace_selected(&state, Node::load(String::from("123").as_bytes()).unwrap());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Load(Node::load(String::from("123").as_bytes()).unwrap()),
+        );
         worktree.handle_save_done();
         assert!(worktree.maybe_exit(ConfirmAction::Request(())));
     }
@@ -711,8 +746,11 @@ mod test {
         let json = String::from("123");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
 
-        let mut state = WorkTreeState::default();
-        worktree.replace_selected(&state, Node::load(String::from("456").as_bytes()).unwrap());
+        let mut state = WorkSpaceState::default();
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Load(Node::load(String::from("456").as_bytes()).unwrap()),
+        );
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state,));
@@ -723,10 +761,11 @@ mod test {
         let json = String::from("123");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
 
-        let mut state = WorkTreeState::default();
-        worktree
-            .handle_save_action(ConfirmAction::Request(()))
-            .unwrap();
+        let mut state = WorkSpaceState::default();
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Save(ConfirmAction::Request(())),
+        );
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state,));
     }
@@ -739,18 +778,18 @@ mod test {
         }))
         .unwrap();
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
+        let mut state = WorkSpaceState::default();
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::TogglePreview);
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::Down);
+        worktree.test_action(&mut state, NavigationAction::Down.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::TogglePreview);
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
@@ -762,7 +801,7 @@ mod test {
         }))
         .unwrap();
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
+        let mut state = WorkSpaceState::default();
 
         for action in [
             NavigationAction::TogglePreview,
@@ -772,7 +811,7 @@ mod test {
             NavigationAction::Down,
             NavigationAction::Up,
         ] {
-            worktree.handle_navigation_action(&mut state, action);
+            worktree.test_action(&mut state, action.into());
         }
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
@@ -782,10 +821,10 @@ mod test {
     fn render_preview_scroll_test() {
         let json = include_str!("example.json");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
+        let mut state = WorkSpaceState::default();
 
         for action in [NavigationAction::TogglePreview, NavigationAction::Expand] {
-            worktree.handle_navigation_action(&mut state, action);
+            worktree.test_action(&mut state, action.into());
         }
 
         for action in [
@@ -797,8 +836,7 @@ mod test {
             PreviewNavigationAction::Right,
             PreviewNavigationAction::Left,
         ] {
-            worktree
-                .handle_navigation_action(&mut state, NavigationAction::PreviewNavigation(action));
+            worktree.test_action(&mut state, action.into());
             assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
         }
     }
@@ -807,10 +845,13 @@ mod test {
     fn render_preview_update_on_edit_test() {
         let json = include_str!("example.json");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
+        let mut state = WorkSpaceState::default();
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::TogglePreview);
-        worktree.replace_selected(&state, Node::load("123".as_bytes()).unwrap());
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Load(Node::load("123".as_bytes()).unwrap()),
+        );
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
@@ -819,10 +860,13 @@ mod test {
     fn render_preview_overlap_test() {
         let json = include_str!("example.json");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
+        let mut state = WorkSpaceState::default();
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::TogglePreview);
-        worktree.replace_selected(&state, Node::load(json.as_bytes()).unwrap());
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Load(Node::load(json.as_bytes()).unwrap()),
+        );
         worktree.maybe_exit(ConfirmAction::Request(()));
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
@@ -848,9 +892,9 @@ mod test {
     fn render_loading_test() {
         let json = include_str!("example.json");
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
+        let mut state = WorkSpaceState::default();
 
-        worktree.toggle_preview(&state);
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
         worktree.set_loading(true);
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
@@ -864,15 +908,15 @@ mod test {
         let json_bodies: Vec<_> = std::iter::repeat_n(json_body, 1024).collect();
         let json = String::from("[") + &json_bodies.join(",") + "]";
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap());
-        let mut state = WorkTreeState::default();
+        let mut state = WorkSpaceState::default();
 
-        worktree.toggle_preview(&state);
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::Expand);
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
-        worktree.handle_navigation_action(&mut state, NavigationAction::Up);
+        worktree.test_action(&mut state, NavigationAction::Up.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
@@ -897,5 +941,17 @@ mod test {
         let mut actions = Actions::new();
         worktree.handle_event(&mut actions, event);
         assert_eq!(actions.into_vec(), expected_actions)
+    }
+
+    impl WorkSpace {
+        fn test_action(
+            &mut self,
+            state: &mut WorkSpaceState,
+            action: WorkSpaceAction,
+        ) -> Vec<Action> {
+            let mut actions = Actions::new();
+            self.handle_action(state, &mut actions, action).unwrap();
+            actions.into_vec()
+        }
     }
 }

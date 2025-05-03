@@ -59,7 +59,7 @@ pub enum IndexKind {
 }
 
 #[derive(Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(test, derive(PartialEq, Clone))]
 pub struct Node {
     n_lines: usize,
     n_bytes: usize,
@@ -83,7 +83,7 @@ impl Display for Number {
 }
 
 #[derive(Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(test, derive(PartialEq, Clone))]
 enum Kind {
     Null,
     Bool(bool),
