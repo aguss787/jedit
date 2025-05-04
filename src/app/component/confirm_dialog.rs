@@ -101,43 +101,29 @@ mod test {
             Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::Save)),
         );
 
-        for (code, action) in [
+        for (action, codes) in [
             (
-                KeyCode::Char('y'),
-                WorkSpaceAction::Save(ConfirmAction::Confirm(true)).into(),
+                WorkSpaceAction::Save(ConfirmAction::Confirm(true)),
+                [KeyCode::Char('y'), KeyCode::Char('Y'), KeyCode::Enter],
             ),
             (
-                KeyCode::Char('Y'),
-                WorkSpaceAction::Save(ConfirmAction::Confirm(true)).into(),
-            ),
-            (
-                KeyCode::Enter,
-                WorkSpaceAction::Save(ConfirmAction::Confirm(true)).into(),
-            ),
-            (
-                KeyCode::Char('n'),
-                WorkSpaceAction::Save(ConfirmAction::Confirm(false)).into(),
-            ),
-            (
-                KeyCode::Char('N'),
-                WorkSpaceAction::Save(ConfirmAction::Confirm(false)).into(),
-            ),
-            (
-                KeyCode::Esc,
-                WorkSpaceAction::Save(ConfirmAction::Confirm(false)).into(),
+                WorkSpaceAction::Save(ConfirmAction::Confirm(false)),
+                [KeyCode::Char('n'), KeyCode::Char('N'), KeyCode::Esc],
             ),
         ] {
-            let mut actions = Actions::new();
-            dialog.handle_event(
-                &mut actions,
-                Event::Key(KeyEvent {
-                    code,
-                    modifiers: KeyModifiers::empty(),
-                    kind: KeyEventKind::Press,
-                    state: KeyEventState::NONE,
-                }),
-            );
-            assert_eq!(actions.into_vec(), vec![action])
+            for code in codes {
+                let mut actions = Actions::new();
+                dialog.handle_event(
+                    &mut actions,
+                    Event::Key(KeyEvent {
+                        code,
+                        modifiers: KeyModifiers::empty(),
+                        kind: KeyEventKind::Press,
+                        state: KeyEventState::NONE,
+                    }),
+                );
+                assert_eq!(actions.into_vec(), vec![action.clone().into()])
+            }
         }
     }
 
