@@ -39,7 +39,7 @@ pub struct WorkSpace {
     config: Config,
     file_root: Node,
     work_tree_root: WorkTreeNode,
-    edit_cntr: i64,
+    is_edited: bool,
 
     list: List<'static>,
     dialogs: Vec<ConfirmDialog>,
@@ -57,17 +57,13 @@ impl WorkSpace {
             config,
             file_root,
             work_tree_root,
-            edit_cntr: 0,
+            is_edited: false,
             list,
             dialogs: Vec::new(),
             preview: None,
             preview_pct: 65,
             loading: None,
         }
-    }
-
-    pub fn decrease_edit_cntr(&mut self) {
-        self.edit_cntr -= 1;
     }
 
     pub fn handle_event(&self, actions: &mut Actions, event: Event) {
@@ -161,14 +157,14 @@ impl WorkSpace {
     pub fn maybe_exit(&mut self, confirm_action: ConfirmAction<()>) -> bool {
         match confirm_action {
             ConfirmAction::Request(()) => {
-                if self.edit_cntr != 0 {
+                if self.is_edited {
                     self.dialogs.push(ConfirmDialog::new(
                         Text::from(vec![Line::from("Discard unsaved changes?").centered()]),
                         Box::new(ConfirmAction::action_confirmer(Action::Exit)),
                     ));
                 }
 
-                self.edit_cntr == 0
+                !self.is_edited
             }
             ConfirmAction::Confirm(ok) => {
                 self.dialogs.pop();
@@ -200,7 +196,10 @@ impl WorkSpace {
                 }
             }
             WorkSpaceAction::SaveDone => self.handle_save_done(),
-            WorkSpaceAction::Load(node) => self.replace_selected(state, node),
+            WorkSpaceAction::Load { node, is_edit } => {
+                self.replace_selected(state, node);
+                self.is_edited |= is_edit;
+            }
         }
 
         Ok(())
@@ -299,7 +298,6 @@ impl WorkSpace {
             .replace(&selector, new_node)
             .expect("broken selector");
         self.reindex(index, node_index, false);
-        self.edit_cntr += 1;
 
         if self.preview.is_some() {
             self.set_preview_to_selected(worktree_state);
@@ -380,7 +378,7 @@ impl WorkSpace {
     }
 
     fn handle_save_done(&mut self) {
-        self.edit_cntr = 0;
+        self.is_edited = false;
     }
 }
 
@@ -692,7 +690,10 @@ mod test {
 
         worktree.test_action(
             &mut state,
-            WorkSpaceAction::Load(Node::load("[{}, 5]".as_bytes()).unwrap()),
+            WorkSpaceAction::Load {
+                node: Node::load("[{}, 5]".as_bytes()).unwrap(),
+                is_edit: true,
+            },
         );
 
         assert_eq!(
@@ -810,21 +811,30 @@ mod test {
         let mut state = WorkSpaceState::default();
         worktree.test_action(
             &mut state,
-            WorkSpaceAction::Load(Node::load(String::from("456").as_bytes()).unwrap()),
+            WorkSpaceAction::Load {
+                node: Node::load(String::from("456").as_bytes()).unwrap(),
+                is_edit: true,
+            },
         );
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
         assert!(!worktree.maybe_exit(ConfirmAction::Confirm(false)));
 
         worktree.test_action(
             &mut state,
-            WorkSpaceAction::Load(Node::load(String::from("123").as_bytes()).unwrap()),
+            WorkSpaceAction::Load {
+                node: Node::load(String::from("123").as_bytes()).unwrap(),
+                is_edit: true,
+            },
         );
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
         assert!(worktree.maybe_exit(ConfirmAction::Confirm(true)));
 
         worktree.test_action(
             &mut state,
-            WorkSpaceAction::Load(Node::load(String::from("123").as_bytes()).unwrap()),
+            WorkSpaceAction::Load {
+                node: Node::load(String::from("123").as_bytes()).unwrap(),
+                is_edit: true,
+            },
         );
         worktree.handle_save_done();
         assert!(worktree.maybe_exit(ConfirmAction::Request(())));
@@ -838,7 +848,10 @@ mod test {
         let mut state = WorkSpaceState::default();
         worktree.test_action(
             &mut state,
-            WorkSpaceAction::Load(Node::load(String::from("456").as_bytes()).unwrap()),
+            WorkSpaceAction::Load {
+                node: Node::load(String::from("456").as_bytes()).unwrap(),
+                is_edit: true,
+            },
         );
         assert!(!worktree.maybe_exit(ConfirmAction::Request(())));
 
@@ -966,7 +979,10 @@ mod test {
         worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
         worktree.test_action(
             &mut state,
-            WorkSpaceAction::Load(Node::load("123".as_bytes()).unwrap()),
+            WorkSpaceAction::Load {
+                node: Node::load("123".as_bytes()).unwrap(),
+                is_edit: true,
+            },
         );
 
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
@@ -983,7 +999,10 @@ mod test {
         worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
         worktree.test_action(
             &mut state,
-            WorkSpaceAction::Load(Node::load(SAMPLE_JSON.as_bytes()).unwrap()),
+            WorkSpaceAction::Load {
+                node: Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+                is_edit: true,
+            },
         );
         worktree.maybe_exit(ConfirmAction::Request(()));
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));

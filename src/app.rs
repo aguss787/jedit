@@ -46,17 +46,20 @@ impl CliApp {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
             })?;
 
-            Ok(WorkSpaceAction::Load(file_root).into())
+            Ok(WorkSpaceAction::Load {
+                node: file_root,
+                is_edit: false,
+            }
+            .into())
         });
 
-        let mut cli_app = Self {
+        let cli_app = Self {
             worktree: WorkSpace::new(Node::null(), Config::load()),
             worktree_state: WorkSpaceState::default(),
             state: GlobalState { exit: false },
             output_file_name,
             jobs: vec![initial_load_job],
         };
-        cli_app.worktree.decrease_edit_cntr();
         Ok(cli_app)
     }
 
@@ -164,7 +167,11 @@ impl CliApp {
                             WorkSpaceAction::EditError(ConfirmAction::Request(error.to_string()))
                                 .into(),
                         ),
-                        Ok(node) => Ok(WorkSpaceAction::Load(node).into()),
+                        Ok(node) => Ok(WorkSpaceAction::Load {
+                            node,
+                            is_edit: true,
+                        }
+                        .into()),
                     }
                 })
             }

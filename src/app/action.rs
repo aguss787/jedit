@@ -72,7 +72,7 @@ pub(crate) enum WorkSpaceAction {
     EditError(ConfirmAction<String>),
     Save(ConfirmAction<()>),
     SaveDone,
-    Load(Node),
+    Load { node: Node, is_edit: bool },
 }
 
 impl From<WorkSpaceAction> for Action {
