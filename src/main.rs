@@ -2,6 +2,9 @@ mod app;
 mod container;
 mod error;
 
+#[cfg(test)]
+mod fixtures;
+
 use std::io;
 
 use app::CliApp;

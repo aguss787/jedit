@@ -164,11 +164,9 @@ impl Content {
 mod test {
     use insta::assert_snapshot;
 
-    use crate::app::component::test_render::stateful_render_to_string;
+    use crate::{app::component::test_render::stateful_render_to_string, fixtures::SAMPLE_JSON};
 
     use super::*;
-
-    static JSON_DATA: &str = include_str!("example.json");
 
     #[test]
     fn render_short_test() {
@@ -239,7 +237,7 @@ mod test {
 
     #[test]
     fn render_test() {
-        let preview = Preview::new(Some(JSON_DATA.to_string()));
+        let preview = Preview::new(Some(SAMPLE_JSON.to_string()));
         let mut preview_state = PreviewState::default();
 
         assert_snapshot!(stateful_render_to_string(&preview, &mut preview_state));

@@ -485,7 +485,7 @@ mod test {
     use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use insta::assert_snapshot;
 
-    use crate::app::component::test_render::stateful_render_to_string;
+    use crate::{app::component::test_render::stateful_render_to_string, fixtures::SAMPLE_JSON};
 
     use super::*;
 
@@ -908,8 +908,10 @@ mod test {
 
     #[test]
     fn render_preview_scroll_test() {
-        let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), Config::default());
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
         let mut state = WorkSpaceState::default();
 
         for action in [NavigationAction::TogglePreview, NavigationAction::Expand] {
@@ -932,8 +934,10 @@ mod test {
 
     #[test]
     fn render_preview_overflow_scroll_test() {
-        let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), Config::default());
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
         let mut state = WorkSpaceState::default();
 
         for action in [NavigationAction::TogglePreview, NavigationAction::Expand] {
@@ -953,8 +957,10 @@ mod test {
 
     #[test]
     fn render_preview_update_on_edit_test() {
-        let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), Config::default());
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
         let mut state = WorkSpaceState::default();
 
         worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
@@ -968,14 +974,16 @@ mod test {
 
     #[test]
     fn render_preview_overlap_test() {
-        let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), Config::default());
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
         let mut state = WorkSpaceState::default();
 
         worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
         worktree.test_action(
             &mut state,
-            WorkSpaceAction::Load(Node::load(json.as_bytes()).unwrap()),
+            WorkSpaceAction::Load(Node::load(SAMPLE_JSON.as_bytes()).unwrap()),
         );
         worktree.maybe_exit(ConfirmAction::Request(()));
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
@@ -986,8 +994,10 @@ mod test {
 
     #[test]
     fn meta_test() {
-        let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), Config::default());
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
 
         assert_eq!(
             worktree.meta_on_index(0),
@@ -1000,8 +1010,10 @@ mod test {
 
     #[test]
     fn render_loading_test() {
-        let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), Config::default());
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
         let mut state = WorkSpaceState::default();
 
         worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
@@ -1014,8 +1026,7 @@ mod test {
 
     #[test]
     fn render_large_preview_test() {
-        let json_body = include_str!("example.json");
-        let json_bodies: Vec<_> = std::iter::repeat_n(json_body, 1024).collect();
+        let json_bodies: Vec<_> = std::iter::repeat_n(SAMPLE_JSON, 1024).collect();
         let json = String::from("[") + &json_bodies.join(",") + "]";
         let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), Config::default());
         let mut state = WorkSpaceState::default();
@@ -1032,9 +1043,8 @@ mod test {
 
     #[test]
     fn render_preview_limited_by_config_test() {
-        let json = include_str!("example.json");
         let config = Config::default().with_max_preview_size(Byte::from_u64(3718));
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), config);
+        let mut worktree = WorkSpace::new(Node::load(SAMPLE_JSON.as_bytes()).unwrap(), config);
         assert_eq!(worktree.file_root.to_string_pretty().unwrap().len(), 3718);
         let mut state = WorkSpaceState::default();
 
@@ -1042,15 +1052,17 @@ mod test {
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
         let config = Config::default().with_max_preview_size(Byte::from_u64(3717));
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), config);
+        let mut worktree = WorkSpace::new(Node::load(SAMPLE_JSON.as_bytes()).unwrap(), config);
         worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
     #[test]
     fn render_navigation_far_test() {
-        let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), Config::default());
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
         let mut state = WorkSpaceState::default();
 
         worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
@@ -1070,8 +1082,10 @@ mod test {
 
     #[test]
     fn render_preview_resize_test() {
-        let json = include_str!("example.json");
-        let mut worktree = WorkSpace::new(Node::load(json.as_bytes()).unwrap(), Config::default());
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
         let mut state = WorkSpaceState::default();
 
         worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
