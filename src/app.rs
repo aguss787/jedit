@@ -1,5 +1,6 @@
 mod action;
 mod component;
+mod config;
 mod job;
 mod math;
 
@@ -14,6 +15,7 @@ use action::{
     Action, Actions, ConfirmAction, EditJobAction, JobAction, NavigationAction, WorkSpaceAction,
 };
 use component::workspace::{WorkSpace, WorkSpaceState};
+use config::Config;
 use crossterm::{
     ExecutableCommand,
     event::{self, Event, KeyCode},
@@ -48,7 +50,7 @@ impl CliApp {
         });
 
         let mut cli_app = Self {
-            worktree: WorkSpace::new(Node::null()),
+            worktree: WorkSpace::new(Node::null(), Config::load()),
             worktree_state: WorkSpaceState::default(),
             state: GlobalState { exit: false },
             output_file_name,
