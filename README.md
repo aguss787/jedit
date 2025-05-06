@@ -1,5 +1,10 @@
 # Jedit
 
+[![CI](https://github.com/aguss787/jedit/actions/workflows/test.yml/badge.svg?branch=master)](https://github.com/aguss787/jedit/actions/workflows/test.yml)
+![Dependabot](https://flat.badgen.net/github/dependabot/aguss787/jedit?icon=dependabot)
+![Latest Release](https://flat.badgen.net/github/release/aguss787/jedit?icon=github)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/aguss787/jedit/blob/master/LICENSE)
+
 **Jedit** is a command-line tool to view and edit large JSON file directly within your terminal.
 
 ![screenshot](docs/screenshot.png)
