@@ -22,7 +22,18 @@ cargo build --release
 ## Usage
 
 ```bash
-jedit --help
+$ jedit --help
+
+View and edit JSON file
+
+Usage: jedit [OPTIONS] <INPUT>
+
+Arguments:
+  <INPUT>  JSON file to edit
+
+Options:
+  -o, --output <OUTPUT>  Output file to write to. Defaults to overwrite the input file
+  -h, --help             Print help
 ```
 
 ## Keybind
