@@ -235,7 +235,7 @@ impl WorkSpace {
                 state.list_state.select_first();
             }
             NavigationAction::Bottom => {
-                state.list_state.select_last();
+                state.list_state.select(Some(self.work_tree_root.len() - 1));
             }
             NavigationAction::Expand => {
                 if let Some(index) = state.list_state.selected() {
@@ -1162,6 +1162,23 @@ mod test {
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
 
         worktree.test_action(&mut state, NavigationAction::Top.into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_bottom_select_last_index_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::Bottom.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(&mut state, NavigationAction::Bottom.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
