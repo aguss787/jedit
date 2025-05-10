@@ -1,7 +1,9 @@
 [package]
 name = "jedit"
+description = "Command-line tool to view and edit large JSON file"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 byte-unit = { version = "5.1.6", features = ["serde"] }
