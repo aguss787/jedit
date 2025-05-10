@@ -46,6 +46,8 @@ Options:
 | l / Enter / Space | Expand                 |
 | Ctrl + u          | Up 10                  |
 | Ctrl + d          | Down 10                |
+| g                 | Move to top            |
+| G                 | Move to bottom         |
 | h                 | Close                  |
 | p                 | Toggle preview         |
 | e                 | Edit value             |

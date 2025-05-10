@@ -106,6 +106,12 @@ impl WorkSpace {
         }
 
         match event.code {
+            KeyCode::Char('g') => {
+                actions.push(NavigationAction::Top.into());
+            }
+            KeyCode::Char('G') => {
+                actions.push(NavigationAction::Bottom.into());
+            }
             KeyCode::Char('k') | KeyCode::Up => {
                 actions.push(NavigationAction::Up(1).into());
             }
@@ -224,6 +230,12 @@ impl WorkSpace {
                     .saturating_add(n)
                     .min(self.work_tree_root.len().saturating_sub(1));
                 state.list_state.select(Some(index));
+            }
+            NavigationAction::Top => {
+                state.list_state.select_first();
+            }
+            NavigationAction::Bottom => {
+                state.list_state.select_last();
             }
             NavigationAction::Expand => {
                 if let Some(index) = state.list_state.selected() {
@@ -1129,6 +1141,27 @@ mod test {
             &mut state,
             NavigationAction::PreviewWindowResize(Op::Add(100)).into(),
         );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_top_bottom_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        for _ in 0..4 {
+            worktree.test_action(&mut state, NavigationAction::Expand.into());
+        }
+        worktree.test_action(&mut state, NavigationAction::Down(2).into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+
+        worktree.test_action(&mut state, NavigationAction::Bottom.into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(&mut state, NavigationAction::Top.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 

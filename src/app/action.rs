@@ -30,6 +30,8 @@ impl From<PreviewNavigationAction> for WorkSpaceAction {
 pub enum NavigationAction {
     Up(usize),
     Down(usize),
+    Top,
+    Bottom,
     Expand,
     Close,
     TogglePreview,
