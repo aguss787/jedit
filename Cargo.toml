@@ -1,6 +1,7 @@
 [package]
 name = "jedit"
 description = "Command-line tool to view and edit large JSON file"
+repository = "https://github.com/aguss787/jedit"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
