@@ -52,6 +52,7 @@ Options:
 | h                 | Close                  |
 | p                 | Toggle preview         |
 | e                 | Edit value             |
+| r                 | Rename key             |
 | w                 | Save                   |
 | K                 | Preview up             |
 | J                 | Preview down           |
