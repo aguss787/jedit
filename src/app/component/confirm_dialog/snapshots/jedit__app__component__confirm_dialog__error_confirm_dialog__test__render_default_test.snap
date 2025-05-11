@@ -1,6 +1,6 @@
 ---
-source: src/app/component/confirm_dialog.rs
-expression: render_to_string(&dialog)
+source: src/app/component/confirm_dialog/error_confirm_dialog.rs
+expression: "render_to_string(&ErrorConfirmDialog::new(\"short error!\".into()))"
 ---
 "                                                                                "
 "                                                                                "
@@ -9,12 +9,12 @@ expression: render_to_string(&dialog)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-"                            ┌────────Error─────────┐                            "
+"                                                                                "
+"                            ┌────────Error!────────┐                            "
 "                            │                      │                            "
-"                            │ Broken IO pipe       │                            "
-"                            │ continue?            │                            "
+"                            │ short error!         │                            "
 "                            │                      │                            "
-"                            └─────[Y]es / [N]o─────┘                            "
+"                            └────Press any key─────┘                            "
 "                                                                                "
 "                                                                                "
 "                                                                                "

@@ -37,3 +37,14 @@ pub enum IndexingError {
     #[error("Missing key: {0}")]
     MissingKey(String),
 }
+
+#[derive(Debug, thiserror::Error)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum MutationError {
+    #[error("Duplicate key")]
+    DuplicateKey,
+    #[error("Not renameable")]
+    NotRenameable,
+    #[error(transparent)]
+    Indexing(#[from] IndexingError),
+}

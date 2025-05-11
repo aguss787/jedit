@@ -68,5 +68,4 @@ Options:
 - [ ] Inline key operation
   - [ ] Add new key
   - [ ] Delete key
-  - [ ] Rename key
 - [ ] Prettier error message

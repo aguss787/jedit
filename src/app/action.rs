@@ -53,15 +53,15 @@ impl From<NavigationAction> for WorkSpaceAction {
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone, Copy))]
-pub enum ConfirmAction<T> {
+pub enum ConfirmAction<T, C = bool> {
     Request(T),
-    Confirm(bool),
+    Confirm(C),
 }
 
-impl<T> ConfirmAction<T> {
+impl<T, C> ConfirmAction<T, C> {
     pub(crate) fn action_confirmer<R: Into<Action>>(
-        f: impl Fn(ConfirmAction<T>) -> R,
-    ) -> impl Fn(bool) -> Action {
+        f: impl Fn(ConfirmAction<T, C>) -> R,
+    ) -> impl Fn(C) -> Action {
         move |b| f(ConfirmAction::Confirm(b)).into()
     }
 }
@@ -74,7 +74,9 @@ pub(crate) enum WorkSpaceAction {
     EditError(ConfirmAction<String>),
     Save(ConfirmAction<()>),
     SaveDone,
+    ErrorConfirmed,
     Load { node: Node, is_edit: bool },
+    Rename(ConfirmAction<(), Option<String>>),
 }
 
 impl From<WorkSpaceAction> for Action {

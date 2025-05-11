@@ -5,7 +5,7 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use serde::Serialize;
 
 use super::INDENT;
-use crate::error::{DeserializationError, DumpError, IndexingError, LoadError};
+use crate::error::{DeserializationError, DumpError, IndexingError, LoadError, MutationError};
 
 struct Selector<'a, T> {
     keys: &'a [T],
@@ -93,6 +93,12 @@ enum Kind {
     Object(IndexMap<String, Node>),
 }
 
+#[derive(Debug)]
+pub enum NodeMutation<'a> {
+    Replace(Node),
+    Rename { before: &'a str, after: String },
+}
+
 impl Node {
     pub fn load(reader: impl std::io::Read) -> Result<Self, LoadError> {
         let value: serde_json::Value = sonic_rs::from_reader(reader)?;
@@ -111,8 +117,29 @@ impl Node {
         &mut self,
         selector: &[T],
         node: Node,
-    ) -> Result<Node, IndexingError> {
-        self.replace_inner(Selector::new(selector), node)
+    ) -> Result<Node, MutationError> {
+        self.mutate(Selector::new(selector), NodeMutation::Replace(node))
+            .map(|res| res.expect("replace mutation should return the old node"))
+    }
+
+    pub fn rename<T: Deref<Target = str>>(
+        &mut self,
+        selector: &[T],
+        new_name: String,
+    ) -> Result<(), MutationError> {
+        let len = selector.len();
+        if len == 0 {
+            return Err(IndexingError::NotIndexable.into());
+        }
+
+        self.mutate(
+            Selector::new(&selector[..len - 1]),
+            NodeMutation::Rename {
+                before: selector[len - 1].deref(),
+                after: new_name,
+            },
+        )
+        .map(|_| ())
     }
 
     pub fn as_index(&self) -> Index {
@@ -245,11 +272,11 @@ impl Node {
         }
     }
 
-    fn replace_inner<T: Deref<Target = str>>(
+    fn mutate<T: Deref<Target = str>>(
         &mut self,
         mut selector: Selector<'_, T>,
-        mut new_node: Self,
-    ) -> Result<Self, IndexingError> {
+        mutation: NodeMutation,
+    ) -> Result<Option<Self>, MutationError> {
         if let Some(next_key) = selector.next() {
             let missing_key = || IndexingError::MissingKey(next_key.to_string());
             let next_node = match &mut self.data {
@@ -259,22 +286,43 @@ impl Node {
                 }
                 Kind::Object(index_map) => index_map.get_mut(next_key).ok_or_else(missing_key)?,
                 Kind::Null | Kind::Bool(_) | Kind::Number(_) | Kind::String(_) => {
-                    return Err(IndexingError::NotIndexable);
+                    return Err(IndexingError::NotIndexable.into());
                 }
             };
 
             let old_n_lines = next_node.n_lines;
             let old_n_bytes = next_node.indented_n_bytes();
-            // TODO recompute meta
-            let old_node = next_node.replace_inner(selector, new_node)?;
+            let old_node = next_node.mutate(selector, mutation)?;
 
             self.n_lines = self.n_lines - old_n_lines + next_node.n_lines;
             self.n_bytes = self.n_bytes - old_n_bytes + next_node.indented_n_bytes();
 
             Ok(old_node)
         } else {
-            std::mem::swap(self, &mut new_node);
-            Ok(new_node)
+            match mutation {
+                NodeMutation::Replace(mut new_node) => {
+                    std::mem::swap(self, &mut new_node);
+                    Ok(Some(new_node))
+                }
+                NodeMutation::Rename { before, after } => match &mut self.data {
+                    Kind::Array(_) => Err(MutationError::NotRenameable),
+                    Kind::Object(index_map) => {
+                        if index_map.contains_key(&after) {
+                            return Err(MutationError::DuplicateKey);
+                        };
+                        let (index, _, node) = index_map
+                            .swap_remove_full(before)
+                            .ok_or_else(|| IndexingError::MissingKey(before.to_string()))?;
+                        self.n_bytes = self.n_bytes + after.len() - before.len();
+                        let (last_index, _) = index_map.insert_full(after, node);
+                        index_map.swap_indices(index, last_index);
+                        Ok(None)
+                    }
+                    Kind::Null | Kind::Bool(_) | Kind::Number(_) | Kind::String(_) => {
+                        Err(IndexingError::NotIndexable.into())
+                    }
+                },
+            }
         }
     }
 
@@ -578,6 +626,49 @@ mod test {
                         "cat",
                         "dog"
                     ]
+                },
+                "array": [
+                    1,
+                    2,
+                    3
+                ]
+            }))
+            .unwrap()
+        );
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn rename_test() {
+        let original = json!({
+            "a": "x",
+            "b": "x",
+            "nested": {
+                "key": "value",
+                "other_key": "other_value",
+                "tail": "tail_value"
+            },
+            "array": [
+                1,
+                2,
+                3
+            ]
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        node.rename(&["nested", "other_key"], String::from("new_key"))
+            .unwrap();
+
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
+                "a": "x",
+                "b": "x",
+                "nested": {
+                    "key": "value",
+                    "new_key": "other_value",
+                    "tail": "tail_value"
                 },
                 "array": [
                     1,

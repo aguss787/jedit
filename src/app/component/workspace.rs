@@ -22,14 +22,18 @@ use crate::{
             ConfirmAction, EditJobAction, JobAction, NavigationAction, PreviewNavigationAction,
             WorkSpaceAction,
         },
+        component::confirm_dialog::{
+            error_confirm_dialog::ErrorConfirmDialog, text_confirm_dialog::TextConfirmDialog,
+        },
         config::Config,
         math::Op,
     },
     container::node::{Index, IndexKind, Node, NodeMeta},
+    error::MutationError,
 };
 
 use super::{
-    confirm_dialog::ConfirmDialog,
+    confirm_dialog::{ConfirmDialog, boolean_confirm_dialog::BooleanConfirmDialog},
     loading::Loading,
     preview::{Preview, PreviewState},
     scrollbar::scrollbar,
@@ -42,7 +46,8 @@ pub struct WorkSpace {
     is_edited: bool,
 
     list: List<'static>,
-    dialogs: Vec<ConfirmDialog>,
+    // dialogs: Vec<BooleanConfirmDialog>,
+    dialogs: Vec<Box<dyn ConfirmDialog>>,
     preview: Option<Preview>,
     preview_pct: u16,
     loading: Option<Loading>,
@@ -71,7 +76,7 @@ impl WorkSpace {
             return;
         }
 
-        if let Some(dialog) = self.dialogs.first() {
+        if let Some(dialog) = self.dialogs.last() {
             dialog.handle_event(actions, event);
             return;
         }
@@ -148,6 +153,9 @@ impl WorkSpace {
             KeyCode::Char('L') => {
                 actions.push(PreviewNavigationAction::Right.into());
             }
+            KeyCode::Char('r') => {
+                actions.push(WorkSpaceAction::Rename(ConfirmAction::Request(())).into());
+            }
             _ => {}
         }
     }
@@ -164,10 +172,10 @@ impl WorkSpace {
         match confirm_action {
             ConfirmAction::Request(()) => {
                 if self.is_edited {
-                    self.dialogs.push(ConfirmDialog::new(
+                    self.dialogs.push(Box::new(BooleanConfirmDialog::new(
                         Text::from(vec![Line::from("Discard unsaved changes?").centered()]),
                         Box::new(ConfirmAction::action_confirmer(Action::Exit)),
-                    ));
+                    )));
                 }
 
                 !self.is_edited
@@ -195,6 +203,9 @@ impl WorkSpace {
                     actions.push(JobAction::Edit(EditJobAction::Open).into());
                 }
             }
+            WorkSpaceAction::Rename(confirm_action) => {
+                self.handle_rename(state, confirm_action)?;
+            }
             WorkSpaceAction::Save(confirm_action) => {
                 self.dialogs.pop();
                 if let Some(action) = self.handle_save_action(confirm_action)? {
@@ -205,6 +216,9 @@ impl WorkSpace {
             WorkSpaceAction::Load { node, is_edit } => {
                 self.replace_selected(state, node);
                 self.is_edited |= is_edit;
+            }
+            WorkSpaceAction::ErrorConfirmed => {
+                self.dialogs.pop();
             }
         }
 
@@ -366,16 +380,96 @@ impl WorkSpace {
 }
 
 impl WorkSpace {
+    fn handle_rename(
+        &mut self,
+        state: &WorkSpaceState,
+        confirm_action: ConfirmAction<(), Option<String>>,
+    ) -> std::io::Result<()> {
+        let index = state.list_state.selected().unwrap_or_default();
+        if index == 0 {
+            self.dialogs.push(Box::new(
+                ErrorConfirmDialog::new("Index cannot be 0".into())
+                    .title(Line::from("Invalid selection")),
+            ));
+            return Ok(());
+        }
+
+        match confirm_action {
+            ConfirmAction::Request(_) => {
+                let selector = self.work_tree_root.selector(index);
+                let index = self
+                    .file_root
+                    .subtree(&selector[..selector.len() - 1])
+                    .expect("broken selector")
+                    .as_index();
+                match index.kind {
+                    IndexKind::Object(_) => {
+                        self.dialogs.push(Box::new(
+                            TextConfirmDialog::new(Box::new(ConfirmAction::action_confirmer(
+                                WorkSpaceAction::Rename,
+                            )))
+                            .title("Rename".into())
+                            .content(selector.last().expect("broken selector").to_string()),
+                        ));
+                    }
+                    IndexKind::Array(_) | IndexKind::Terminal => {
+                        self.dialogs.push(Box::new(ErrorConfirmDialog::new(
+                            "Cannot rename list".into(),
+                        )));
+                    }
+                }
+            }
+            ConfirmAction::Confirm(new_key) => {
+                self.dialogs.pop();
+
+                if let Some(new_key) = new_key {
+                    let selector = self.work_tree_root.selector(index);
+                    if selector
+                        .last()
+                        .is_some_and(|&old_key| old_key != new_key.as_str())
+                    {
+                        match self.file_root.rename(&selector, new_key.clone()) {
+                            Ok(_) => {
+                                self.work_tree_root.rename(index, new_key);
+                                self.is_edited = true;
+                                self.list = new_list(&self.work_tree_root);
+                            }
+                            Err(MutationError::DuplicateKey) => {
+                                self.dialogs.push(Box::new(
+                                    TextConfirmDialog::new(Box::new(
+                                        ConfirmAction::action_confirmer(WorkSpaceAction::Rename),
+                                    ))
+                                    .title("Rename".into())
+                                    .content(new_key),
+                                ));
+                                self.dialogs.push(Box::new(ErrorConfirmDialog::new(
+                                    "Duplicate key".into(),
+                                )));
+                            }
+                            Err(err) => {
+                                panic!("broken selector {}", err)
+                            }
+                        };
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl WorkSpace {
     fn handle_save_action(
         &mut self,
         confirm_action: ConfirmAction<()>,
     ) -> std::io::Result<Option<Action>> {
         match confirm_action {
             ConfirmAction::Request(()) => {
-                self.dialogs.push(ConfirmDialog::new(
+                self.dialogs.push(Box::new(BooleanConfirmDialog::new(
                     Text::from(Line::from("Write file?").centered()),
                     Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::Save)),
-                ));
+                )));
                 Ok(None)
             }
             ConfirmAction::Confirm(ok) => {
@@ -398,7 +492,7 @@ impl WorkSpace {
     fn handle_edit_error_action(&mut self, confirm_action: ConfirmAction<String>) -> bool {
         match confirm_action {
             ConfirmAction::Request(message) => {
-                let mut confirm_dialog = ConfirmDialog::new(
+                let mut confirm_dialog = BooleanConfirmDialog::new(
                     Text::from(vec![
                         Line::from(message),
                         Line::from(""),
@@ -407,7 +501,7 @@ impl WorkSpace {
                     Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::EditError)),
                 );
                 confirm_dialog.title(Some(Line::from("JSON Error").left_aligned()));
-                self.dialogs.push(confirm_dialog);
+                self.dialogs.push(Box::new(confirm_dialog));
                 false
             }
             ConfirmAction::Confirm(ok) => {
@@ -453,7 +547,7 @@ impl StatefulWidget for &WorkSpace {
         }
 
         for dialog in &self.dialogs {
-            dialog.render(area, buf);
+            dialog.render_ref(area, buf);
         }
 
         if let Some(loading) = &self.loading {
@@ -1179,6 +1273,120 @@ mod test {
 
         worktree.test_action(&mut state, NavigationAction::Bottom.into());
         worktree.test_action(&mut state, NavigationAction::Expand.into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_rename_root_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Request(())),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_invalid_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Request(())),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_rename_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Request(())),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Confirm(None)),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Confirm(Some(String::from("new_key")))),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Request(())),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_rename_duplicate_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Confirm(Some(String::from("taglib")))),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_rename_does_not_change_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Confirm(Some(String::from("servlet")))),
+        );
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 

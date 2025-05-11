@@ -1,5 +1,5 @@
 ---
-source: src/app/component/confirm_dialog.rs
+source: src/app/component/confirm_dialog/text_confirm_dialog.rs
 expression: render_to_string(&dialog)
 ---
 "                                                                                "
@@ -10,11 +10,11 @@ expression: render_to_string(&dialog)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-"                        ┌──────────────────────────────┐                        "
-"                        │                              │                        "
-"                        │ Save all files in workspace? │                        "
-"                        │                              │                        "
-"                        └─────────[Y]es / [N]o─────────┘                        "
+"                                                                                "
+"             ┌Input───────────────────────────────────────────────┐             "
+"             │> default value123█                                 │             "
+"             └────────────────────────────────────────────────────┘             "
+"                                                                                "
 "                                                                                "
 "                                                                                "
 "                                                                                "

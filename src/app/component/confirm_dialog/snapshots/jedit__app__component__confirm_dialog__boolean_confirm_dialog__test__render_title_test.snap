@@ -1,5 +1,5 @@
 ---
-source: src/app/component/confirm_dialog.rs
+source: src/app/component/confirm_dialog/boolean_confirm_dialog.rs
 expression: render_to_string(&dialog)
 ---
 "                                                                                "
@@ -9,13 +9,13 @@ expression: render_to_string(&dialog)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-"                            ┌──────────────────────┐                            "
+"                            ┌────────Error─────────┐                            "
 "                            │                      │                            "
-"                            │ Error:               │                            "
 "                            │ Broken IO pipe       │                            "
 "                            │ continue?            │                            "
 "                            │                      │                            "
 "                            └─────[Y]es / [N]o─────┘                            "
+"                                                                                "
 "                                                                                "
 "                                                                                "
 "                                                                                "

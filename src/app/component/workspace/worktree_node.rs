@@ -91,6 +91,25 @@ impl WorkTreeNode {
         );
     }
 
+    pub(crate) fn rename(&mut self, index: usize, new_key: String) {
+        let new_key_len = new_key.len();
+        let old_key_len = RefCell::new(0);
+        self.traverse_node_mut(
+            index,
+            &mut |_| {},
+            &mut |node: &mut WorkTreeNode| {
+                if let Some(meta) = &mut node.meta {
+                    meta.n_bytes -= *old_key_len.borrow();
+                    meta.n_bytes += new_key_len;
+                }
+            },
+            |node: &mut WorkTreeNode| {
+                *old_key_len.borrow_mut() = node.name.len();
+                node.name = new_key;
+            },
+        );
+    }
+
     pub fn close(&mut self, index: usize) {
         let old_len = RefCell::new(1);
         self.traverse_node_mut(
