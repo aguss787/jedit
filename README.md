@@ -34,6 +34,7 @@ Arguments:
 Options:
   -o, --output <OUTPUT>  Output file to write to. Defaults to overwrite the input file
   -h, --help             Print help
+  -V, --version          Print version
 ```
 
 ## Keybind

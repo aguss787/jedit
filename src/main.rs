@@ -12,6 +12,7 @@ use clap::Parser;
 
 /// View and edit JSON file
 #[derive(Debug, Parser)]
+#[command(version, about)]
 struct Args {
     /// Output file to write to. Defaults to overwrite the input file
     #[arg(short, long)]
