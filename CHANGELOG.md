@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/aguss787/jedit/compare/v0.1.2...v0.1.3) - 2025-05-12
+
+### Added
+
+- better tree
+- delete key
+
+### Fixed
+
+- remove unstabilized let chain
+
+### Other
+
+- remove unused lifetime
+- *(README)* remove delete key todo from readme
+- *(README)* add step to install from crates.io
+- *(README)* add edit key binding
+
 ## [0.1.2](https://github.com/aguss787/jedit/compare/v0.1.1...v0.1.2) - 2025-05-11
 
 ### Added

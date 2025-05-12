@@ -2,7 +2,7 @@
 name = "jedit"
 description = "Command-line tool to view and edit large JSON file"
 repository = "https://github.com/aguss787/jedit"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 license = "MIT"
 
