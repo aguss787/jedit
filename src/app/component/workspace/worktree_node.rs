@@ -116,14 +116,16 @@ impl WorkTreeNode {
             index,
             &mut |_| {},
             &mut |node: &mut WorkTreeNode, child_index| {
-                if *should_delete.borrow()
-                    && let Some(child) = &mut node.child
-                    && let Some(child_index) = child_index
-                {
+                if *should_delete.borrow() {
+                    let (Some(child), Some(child_index)) = (&mut node.child, child_index) else {
+                        return;
+                    };
                     child.remove(child_index);
-                    if let Some(meta) = node.meta
-                        && matches!(meta.kind, NodeKind::Array)
-                    {
+                    let Some(meta) = node.meta else {
+                        return;
+                    };
+
+                    if matches!(meta.kind, NodeKind::Array) {
                         for (index, child) in child.iter_mut().enumerate() {
                             child.name = index.to_string();
                         }
