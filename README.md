@@ -76,5 +76,4 @@ Options:
 - [ ] Search
 - [ ] Inline key operation
   - [ ] Add new key
-  - [ ] Delete key
 - [ ] Prettier error message
