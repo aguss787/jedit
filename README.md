@@ -53,6 +53,7 @@ Options:
 | p                 | Toggle preview         |
 | e                 | Edit value             |
 | r                 | Rename key             |
+| d                 | Delete key             |
 | w                 | Save                   |
 | K                 | Preview up             |
 | J                 | Preview down           |

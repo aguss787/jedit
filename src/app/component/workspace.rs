@@ -156,6 +156,9 @@ impl WorkSpace {
             KeyCode::Char('r') => {
                 actions.push(WorkSpaceAction::Rename(ConfirmAction::Request(())).into());
             }
+            KeyCode::Char('d') => {
+                actions.push(WorkSpaceAction::Delete(ConfirmAction::Request(())).into());
+            }
             _ => {}
         }
     }
@@ -205,6 +208,9 @@ impl WorkSpace {
             }
             WorkSpaceAction::Rename(confirm_action) => {
                 self.handle_rename(state, confirm_action)?;
+            }
+            WorkSpaceAction::Delete(confirm_action) => {
+                self.handle_delete(state, confirm_action)?;
             }
             WorkSpaceAction::Save(confirm_action) => {
                 self.dialogs.pop();
@@ -278,8 +284,8 @@ impl WorkSpace {
             }
         }
 
-        if self.preview.is_some() && prev_index != state.list_state.selected() {
-            self.set_preview_to_selected(state);
+        if prev_index != state.list_state.selected() {
+            self.set_preview_to_selected(state, false);
         }
     }
 
@@ -324,10 +330,7 @@ impl WorkSpace {
             .replace(&selector, new_node)
             .expect("broken selector");
         self.reindex(index, node_index, false);
-
-        if self.preview.is_some() {
-            self.set_preview_to_selected(worktree_state);
-        }
+        self.set_preview_to_selected(worktree_state, false);
     }
 
     fn reindex(&mut self, index: usize, node_index: Index, force: bool) {
@@ -341,10 +344,14 @@ impl WorkSpace {
             return;
         }
 
-        self.set_preview_to_selected(state);
+        self.set_preview_to_selected(state, true);
     }
 
-    fn set_preview_to_selected(&mut self, state: &WorkSpaceState) {
+    fn set_preview_to_selected(&mut self, state: &WorkSpaceState, force_show: bool) {
+        if self.preview.is_none() && !force_show {
+            return;
+        }
+
         let Some(index) = state.list_state.selected() else {
             return;
         };
@@ -380,20 +387,54 @@ impl WorkSpace {
 }
 
 impl WorkSpace {
+    fn handle_delete(
+        &mut self,
+        state: &mut WorkSpaceState,
+        confirm_action: ConfirmAction<()>,
+    ) -> std::io::Result<()> {
+        let Some(index) = self.index_for_mutation(state) else {
+            return Ok(());
+        };
+
+        match confirm_action {
+            ConfirmAction::Request(_) => {
+                self.dialogs.push(Box::new(BooleanConfirmDialog::new(
+                    Text::from("Delete node?"),
+                    Box::new(ConfirmAction::action_confirmer(WorkSpaceAction::Delete)),
+                )));
+            }
+            ConfirmAction::Confirm(is_delete) => {
+                self.dialogs.pop();
+                if !is_delete {
+                    return Ok(());
+                }
+
+                let mut selector = self.work_tree_root.selector(index);
+                let _ = self.file_root.delete(&selector).expect("broken selector");
+                selector.pop();
+                let parent_metas = self.file_root.metas(&selector).expect("broken selector");
+                self.work_tree_root.delete(index, parent_metas);
+
+                if index >= self.work_tree_root.len() {
+                    state.list_state.select_previous();
+                }
+                self.is_edited = true;
+                self.list = new_list(&self.work_tree_root);
+                self.set_preview_to_selected(state, false);
+            }
+        }
+
+        Ok(())
+    }
+
     fn handle_rename(
         &mut self,
         state: &WorkSpaceState,
         confirm_action: ConfirmAction<(), Option<String>>,
     ) -> std::io::Result<()> {
-        let index = state.list_state.selected().unwrap_or_default();
-        if index == 0 {
-            self.dialogs.push(Box::new(
-                ErrorConfirmDialog::new("Index cannot be 0".into())
-                    .title(Line::from("Invalid selection")),
-            ));
+        let Some(index) = self.index_for_mutation(state) else {
             return Ok(());
-        }
-
+        };
         match confirm_action {
             ConfirmAction::Request(_) => {
                 let selector = self.work_tree_root.selector(index);
@@ -447,7 +488,7 @@ impl WorkSpace {
                                 )));
                             }
                             Err(err) => {
-                                panic!("broken selector {}", err)
+                                panic!("broken selector {err}")
                             }
                         };
                     }
@@ -456,6 +497,19 @@ impl WorkSpace {
         }
 
         Ok(())
+    }
+
+    fn index_for_mutation(&mut self, state: &WorkSpaceState) -> Option<usize> {
+        let index = state.list_state.selected().unwrap_or_default();
+        if index == 0 {
+            self.dialogs.push(Box::new(
+                ErrorConfirmDialog::new("Index cannot be 0".into())
+                    .title(Line::from("Invalid selection")),
+            ));
+            return None;
+        }
+
+        Some(index)
     }
 }
 
@@ -589,7 +643,10 @@ mod test {
     use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use insta::assert_snapshot;
 
-    use crate::{app::component::test_render::stateful_render_to_string, fixtures::SAMPLE_JSON};
+    use crate::{
+        app::component::test_render::stateful_render_to_string, container::node::NodeKind,
+        fixtures::SAMPLE_JSON,
+    };
 
     use super::*;
 
@@ -1129,6 +1186,7 @@ mod test {
             NodeMeta {
                 n_lines: 100,
                 n_bytes: 3718,
+                kind: NodeKind::Object,
             }
         );
     }
@@ -1246,6 +1304,28 @@ mod test {
         );
         let mut state = WorkSpaceState::default();
 
+        for _ in 0..4 {
+            worktree.test_action(&mut state, NavigationAction::Expand.into());
+        }
+        worktree.test_action(&mut state, NavigationAction::Down(2).into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+
+        worktree.test_action(&mut state, NavigationAction::Bottom.into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(&mut state, NavigationAction::Top.into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_top_bottom_preview_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
         for _ in 0..4 {
             worktree.test_action(&mut state, NavigationAction::Expand.into());
         }
@@ -1387,6 +1467,138 @@ mod test {
             &mut state,
             WorkSpaceAction::Rename(ConfirmAction::Confirm(Some(String::from("servlet")))),
         );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_simple_delete_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Confirm(true)),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(&mut state, NavigationAction::Down(2).into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_delete_rename_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Confirm(true)),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Rename(ConfirmAction::Confirm(Some(String::from("new_key")))),
+        );
+
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_delete_preview_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Confirm(true)),
+        );
+
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_delete_and_go_to_bottom_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default(),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Confirm(true)),
+        );
+
+        worktree.test_action(&mut state, NavigationAction::Bottom.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Confirm(true)),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_delete_large_preview_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default().with_max_preview_size(Byte::from_u64(3700)),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Request(())),
+        );
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Delete(ConfirmAction::Confirm(true)),
+        );
+
+        worktree.test_action(&mut state, NavigationAction::Top.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 

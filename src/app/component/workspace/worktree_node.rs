@@ -1,6 +1,6 @@
 use std::{cell::RefCell, slice::Iter};
 
-use crate::container::node::{Index, IndexKind, NodeMeta};
+use crate::container::node::{Index, IndexKind, NodeKind, NodeMeta};
 
 #[derive(Debug)]
 pub struct WorkTreeNode {
@@ -75,7 +75,7 @@ impl WorkTreeNode {
         self.traverse_node_mut(
             index,
             &mut |_| {},
-            &mut |node: &mut WorkTreeNode| {
+            &mut |node: &mut WorkTreeNode, _| {
                 if let Some(old_len) = *old_len.borrow() {
                     node.len -= old_len;
                     node.len += len;
@@ -97,7 +97,7 @@ impl WorkTreeNode {
         self.traverse_node_mut(
             index,
             &mut |_| {},
-            &mut |node: &mut WorkTreeNode| {
+            &mut |node: &mut WorkTreeNode, _| {
                 if let Some(meta) = &mut node.meta {
                     meta.n_bytes -= *old_key_len.borrow();
                     meta.n_bytes += new_key_len;
@@ -110,12 +110,42 @@ impl WorkTreeNode {
         );
     }
 
+    pub(crate) fn delete(&mut self, index: usize, mut parent_metas: Vec<NodeMeta>) {
+        let should_delete = RefCell::new(true);
+        self.traverse_node_mut(
+            index,
+            &mut |_| {},
+            &mut |node: &mut WorkTreeNode, child_index| {
+                if *should_delete.borrow()
+                    && let Some(child) = &mut node.child
+                    && let Some(child_index) = child_index
+                {
+                    child.remove(child_index);
+                    if let Some(meta) = node.meta
+                        && matches!(meta.kind, NodeKind::Array)
+                    {
+                        for (index, child) in child.iter_mut().enumerate() {
+                            child.name = index.to_string();
+                        }
+                    }
+                    *should_delete.borrow_mut() = false;
+                }
+
+                if !*should_delete.borrow() {
+                    node.len -= 1;
+                    node.meta = Some(parent_metas.pop().expect("missing parent meta"));
+                }
+            },
+            |_| {},
+        );
+    }
+
     pub fn close(&mut self, index: usize) {
         let old_len = RefCell::new(1);
         self.traverse_node_mut(
             index,
             &mut |_| {},
-            &mut |node: &mut WorkTreeNode| {
+            &mut |node: &mut WorkTreeNode, _| {
                 node.len -= *old_len.borrow();
             },
             |node: &mut WorkTreeNode| {
@@ -176,13 +206,13 @@ impl WorkTreeNode {
         on_found_hook: F,
     ) where
         B: FnMut(&mut WorkTreeNode),
-        A: FnMut(&mut WorkTreeNode),
+        A: FnMut(&mut WorkTreeNode, Option<usize>),
         F: FnOnce(&mut WorkTreeNode),
     {
         before_visit_hook(self);
         if index == 0 {
             on_found_hook(self);
-            after_visit_hook(self);
+            after_visit_hook(self, None);
             return;
         }
 
@@ -192,10 +222,10 @@ impl WorkTreeNode {
 
         index -= 1;
         let child = self.child.as_deref_mut().into_iter().flatten();
-        for child in child {
+        for (child_index, child) in child.enumerate() {
             if index < child.len {
                 child.traverse_node_mut(index, before_visit_hook, after_visit_hook, on_found_hook);
-                after_visit_hook(self);
+                after_visit_hook(self, Some(child_index));
                 return;
             }
 

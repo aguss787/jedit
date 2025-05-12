@@ -32,6 +32,15 @@ impl<'a, T: Deref<Target = str>> Selector<'a, T> {
 pub struct NodeMeta {
     pub n_lines: usize,
     pub n_bytes: usize,
+    pub kind: NodeKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum NodeKind {
+    Terminal,
+    Object,
+    Array,
 }
 
 impl NodeMeta {
@@ -39,6 +48,7 @@ impl NodeMeta {
         NodeMeta {
             n_lines: 1,
             n_bytes: 4,
+            kind: NodeKind::Terminal,
         }
     }
 }
@@ -76,8 +86,8 @@ enum Number {
 impl Display for Number {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Number::Int(value) => write!(f, "{}", value),
-            Number::Float(value) => write!(f, "{}", value),
+            Number::Int(value) => write!(f, "{value}"),
+            Number::Float(value) => write!(f, "{value}"),
         }
     }
 }
@@ -93,9 +103,20 @@ enum Kind {
     Object(IndexMap<String, Node>),
 }
 
+impl Kind {
+    fn node_kind(&self) -> NodeKind {
+        match self {
+            Self::Null | Self::Bool(_) | Self::Number(_) | Self::String(_) => NodeKind::Terminal,
+            Self::Array(_) => NodeKind::Array,
+            Self::Object(_) => NodeKind::Object,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum NodeMutation<'a> {
     Replace(Node),
+    Delete(&'a str),
     Rename { before: &'a str, after: String },
 }
 
@@ -113,6 +134,15 @@ impl Node {
         self.subtree_inner(Selector::new(selector))
     }
 
+    pub fn metas<T: Deref<Target = str>>(
+        &self,
+        selector: &[T],
+    ) -> Result<Vec<NodeMeta>, IndexingError> {
+        let mut metas = Vec::new();
+        self.metas_inner(Selector::new(selector), &mut metas)?;
+        Ok(metas)
+    }
+
     pub fn replace<T: Deref<Target = str>>(
         &mut self,
         selector: &[T],
@@ -120,6 +150,22 @@ impl Node {
     ) -> Result<Node, MutationError> {
         self.mutate(Selector::new(selector), NodeMutation::Replace(node))
             .map(|res| res.expect("replace mutation should return the old node"))
+    }
+
+    pub fn delete<T: Deref<Target = str>>(
+        &mut self,
+        selector: &[T],
+    ) -> Result<Node, MutationError> {
+        let len = selector.len();
+        if len == 0 {
+            return Err(IndexingError::NotIndexable.into());
+        }
+
+        self.mutate(
+            Selector::new(&selector[..len - 1]),
+            NodeMutation::Delete(selector[len - 1].deref()),
+        )
+        .map(|res| res.expect("delete mutation should return the old node"))
     }
 
     pub fn rename<T: Deref<Target = str>>(
@@ -143,16 +189,21 @@ impl Node {
     }
 
     pub fn as_index(&self) -> Index {
-        let meta = NodeMeta {
-            n_lines: self.n_lines,
-            n_bytes: self.n_bytes,
-        };
+        let meta = self.as_meta();
         let kind = match &self.data {
             Kind::Array(nodes) => IndexKind::Array(nodes.len()),
             Kind::Object(index_map) => IndexKind::Object(index_map.keys().cloned().collect()),
             Kind::Null | Kind::Bool(_) | Kind::Number(_) | Kind::String(_) => IndexKind::Terminal,
         };
         Index { meta, kind }
+    }
+
+    fn as_meta(&self) -> NodeMeta {
+        NodeMeta {
+            n_lines: self.n_lines,
+            n_bytes: self.n_bytes,
+            kind: self.data.node_kind(),
+        }
     }
 }
 
@@ -249,6 +300,32 @@ impl Node {
         self.n_bytes + INDENT * self.n_lines
     }
 
+    fn metas_inner<T: Deref<Target = str>>(
+        &self,
+        mut selector: Selector<'_, T>,
+        metas: &mut Vec<NodeMeta>,
+    ) -> Result<(), IndexingError> {
+        metas.push(self.as_meta());
+
+        if let Some(next_key) = selector.next() {
+            let missing_key = || IndexingError::MissingKey(next_key.to_string());
+            let next_node = match &self.data {
+                Kind::Array(nodes) => {
+                    let index = next_key.parse::<usize>().map_err(|_| missing_key())?;
+                    nodes.get(index).ok_or_else(missing_key)?
+                }
+                Kind::Object(index_map) => index_map.get(next_key).ok_or_else(missing_key)?,
+                Kind::Null | Kind::Bool(_) | Kind::Number(_) | Kind::String(_) => {
+                    return Err(IndexingError::NotIndexable);
+                }
+            };
+
+            next_node.metas_inner(selector, metas)
+        } else {
+            Ok(())
+        }
+    }
+
     fn subtree_inner<T: Deref<Target = str>>(
         &self,
         mut selector: Selector<'_, T>,
@@ -304,6 +381,38 @@ impl Node {
                     std::mem::swap(self, &mut new_node);
                     Ok(Some(new_node))
                 }
+                NodeMutation::Delete(key) => match &mut self.data {
+                    Kind::Array(child) => {
+                        let index = key
+                            .parse::<usize>()
+                            .map_err(|_| IndexingError::MissingKey(key.to_string()))?;
+                        let deleted_node = child.remove(index);
+                        if child.is_empty() {
+                            self.n_lines = 1;
+                            self.n_bytes = 2;
+                        } else {
+                            self.n_lines -= deleted_node.n_lines;
+                            self.n_bytes -= deleted_node.indented_n_bytes() + 2;
+                        }
+                        Ok(Some(deleted_node))
+                    }
+                    Kind::Object(index_map) => {
+                        let deleted_node = index_map
+                            .shift_remove(key)
+                            .ok_or_else(|| IndexingError::MissingKey(key.to_string()))?;
+                        if index_map.is_empty() {
+                            self.n_lines = 1;
+                            self.n_bytes = 2;
+                        } else {
+                            self.n_lines -= deleted_node.n_lines;
+                            self.n_bytes -= deleted_node.indented_n_bytes() + key.len() + 6;
+                        }
+                        Ok(Some(deleted_node))
+                    }
+                    Kind::Null | Kind::Bool(_) | Kind::Number(_) | Kind::String(_) => {
+                        Err(IndexingError::NotIndexable.into())
+                    }
+                },
                 NodeMutation::Rename { before, after } => match &mut self.data {
                     Kind::Array(_) => Err(MutationError::NotRenameable),
                     Kind::Object(index_map) => {
@@ -518,6 +627,7 @@ mod test {
                 meta: NodeMeta {
                     n_lines: 16,
                     n_bytes: 199,
+                    kind: NodeKind::Object,
                 },
                 kind: IndexKind::Object(vec![
                     String::from("string"),
@@ -538,6 +648,7 @@ mod test {
                 meta: NodeMeta {
                     n_lines: 5,
                     n_bytes: 19,
+                    kind: NodeKind::Array,
                 },
                 kind: IndexKind::Array(3)
             }
@@ -548,6 +659,7 @@ mod test {
                 meta: NodeMeta {
                     n_lines: 1,
                     n_bytes: 1,
+                    kind: NodeKind::Terminal,
                 },
                 kind: IndexKind::Terminal
             }
@@ -558,6 +670,7 @@ mod test {
                 meta: NodeMeta {
                     n_lines: 3,
                     n_bytes: 20,
+                    kind: NodeKind::Object,
                 },
                 kind: IndexKind::Object(vec![String::from("key")])
             }
@@ -568,6 +681,7 @@ mod test {
                 meta: NodeMeta {
                     n_lines: 1,
                     n_bytes: 7,
+                    kind: NodeKind::Terminal,
                 },
                 kind: IndexKind::Terminal
             }
@@ -578,7 +692,8 @@ mod test {
             Index {
                 meta: NodeMeta {
                     n_lines: 1,
-                    n_bytes: 3
+                    n_bytes: 3,
+                    kind: NodeKind::Terminal,
                 },
                 kind: IndexKind::Terminal
             }
@@ -678,6 +793,182 @@ mod test {
             }))
             .unwrap()
         );
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn delete_from_array_test() {
+        let original = json!({
+            "array": [
+                1,
+                2,
+                3
+            ]
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        node.delete(&["array", "0"]).unwrap();
+
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
+                "array": [
+                    2,
+                    3
+                ]
+            }))
+            .unwrap()
+        );
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn delete_from_array_last_test() {
+        let original = json!({
+            "array": [
+                1,
+                2,
+                3
+            ]
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        node.delete(&["array", "2"]).unwrap();
+
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
+                "array": [
+                    1,
+                    2
+                ]
+            }))
+            .unwrap()
+        );
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn delete_from_array_empty_test() {
+        let original = json!({
+            "array": [
+                1,
+                2,
+                3
+            ]
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        for _ in 0..3 {
+            node.delete(&["array", "0"]).unwrap();
+        }
+
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
+                "array": []
+            }))
+            .unwrap()
+        );
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn delete_from_array_object_test() {
+        let original = json!({
+            "array": [
+                1,
+                {"key": "value"},
+                3
+            ]
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        node.delete(&["array", "1"]).unwrap();
+
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
+                "array": [1, 3]
+            }))
+            .unwrap()
+        );
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn delete_from_object_test() {
+        let original = json!({
+            "key": "1",
+            "other_key": "2",
+            "new_key": {
+                "nested": "value"
+            }
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        node.delete(&["key"]).unwrap();
+
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
+                "other_key": "2",
+                "new_key": {
+                    "nested": "value"
+                }
+            }))
+            .unwrap()
+        );
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn delete_from_object_nested_test() {
+        let original = json!({
+            "key": "1",
+            "other_key": "2",
+            "new_key": {
+                "nested": "value"
+            }
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        node.delete(&["new_key"]).unwrap();
+
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
+            "key": "1",
+                "other_key": "2"
+            }))
+            .unwrap()
+        );
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn delete_from_object_empty_test() {
+        let original = json!({
+            "key": "1",
+            "other_key": "2",
+            "new_key": {
+                "nested": "value"
+            }
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        node.delete(&["new_key"]).unwrap();
+        node.delete(&["key"]).unwrap();
+        node.delete(&["other_key"]).unwrap();
+
+        assert_eq!(node, Node::from_serde_json(json!({})).unwrap());
 
         node.assert_all_meta();
     }
