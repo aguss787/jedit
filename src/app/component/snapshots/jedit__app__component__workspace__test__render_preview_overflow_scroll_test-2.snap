@@ -4,7 +4,7 @@ expression: "stateful_render_to_string(&worktree, &mut state)"
 ---
 "┌Tree──────────────────────┐┌Preview───────────────────────────────────────────┐"
 "│  root                   ↑││ 83         "betaServer": true                   ↑│"
-"│> --web-app              ║││ 84       }                                      ║│"
+"│> └─ web-app             ║││ 84       }                                      ║│"
 "│                         █││ 85     }                                        ║│"
 "│                         █││ 86   ],                                         ║│"
 "│                         █││ 87   "servlet-mapping": {                       ║│"

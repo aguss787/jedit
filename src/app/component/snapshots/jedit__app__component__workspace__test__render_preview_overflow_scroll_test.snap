@@ -4,7 +4,7 @@ expression: "stateful_render_to_string(&worktree, &mut state)"
 ---
 "┌Tree──────────────────────┐┌Preview───────────────────────────────────────────┐"
 "│  root                   ↑││ 16         "defaultListTemplate": "listTemplate ↑│"
-"│> --web-app              ║││ 17         "defaultFileTemplate": "articleTempl ║│"
+"│> └─ web-app             ║││ 17         "defaultFileTemplate": "articleTempl ║│"
 "│                         █││ 18         "useJSP": false,                     ║│"
 "│                         █││ 19         "jspListTemplate": "listTemplate.jsp █│"
 "│                         █││ 20         "jspFileTemplate": "articleTemplate. █│"

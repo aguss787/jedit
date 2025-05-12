@@ -4,7 +4,7 @@ expression: "stateful_render_to_string(&worktree, &mut state)"
 ---
 "┌Tree──────────────────────┐┌Preview───────────────────────────────────────────┐"
 "│  root                   ↑││ 66     },                                       ↑│"
-"│> --web-app              ║││ 67     {                                        ║│"
+"│> └─ web-app             ║││ 67     {                                        ║│"
 "│                         █││ 68       "servlet-name": "cofaxTools",          ║│"
 "│                         █││ 69       "servlet-class": "org.cofax.cms.CofaxT ║│"
 "│                         █││ 70       "init-param": {                        ║│"

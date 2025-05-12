@@ -1,4 +1,4 @@
-use std::{cell::RefCell, slice::Iter};
+use std::{cell::RefCell, iter::Peekable, slice::Iter};
 
 use crate::container::node::{Index, IndexKind, NodeKind, NodeMeta};
 
@@ -34,7 +34,7 @@ impl WorkTreeNode {
     }
 
     pub fn as_tree_string(&self) -> impl Iterator<Item = String> {
-        std::iter::once(self.formatted_name(0))
+        std::iter::once(self.formatted_name(Vec::new()))
             .chain(WorkTreeStringIter::new(self.child.as_deref()))
     }
 
@@ -237,20 +237,20 @@ impl WorkTreeNode {
         unreachable!()
     }
 
-    fn formatted_name(&self, indent: usize) -> String {
-        prefix(indent).chain(self.name.chars()).collect()
+    fn formatted_name(&self, is_last: Vec<bool>) -> String {
+        prefix(is_last).chain(self.name.chars()).collect()
     }
 }
 
 pub struct WorkTreeStringIter<'a> {
-    stack: Vec<Iter<'a, WorkTreeNode>>,
+    stack: Vec<Peekable<Iter<'a, WorkTreeNode>>>,
 }
 
 impl<'a> WorkTreeStringIter<'a> {
     fn new(init: Option<&'a [WorkTreeNode]>) -> Self {
         Self {
             stack: if let Some(init) = init {
-                vec![init.iter()]
+                vec![init.iter().peekable()]
             } else {
                 Vec::new()
             },
@@ -272,16 +272,36 @@ impl<'a> Iterator for WorkTreeStringIter<'a> {
         }
 
         let next = next?;
-        let depth = self.stack.len();
+        let is_last: Vec<_> = self
+            .stack
+            .iter_mut()
+            .map(|parent| parent.peek().is_none())
+            .collect();
         if let Some(child) = &next.child {
-            self.stack.push(child.iter());
+            self.stack.push(child.iter().peekable());
         }
-        Some(next.formatted_name(depth))
+        Some(next.formatted_name(is_last))
     }
 }
 
-fn prefix(depth: usize) -> impl Iterator<Item = char> {
-    (0..(2 * depth)).map(|_| '-')
+fn prefix(mut is_last: Vec<bool>) -> impl Iterator<Item = char> {
+    let last = is_last.pop();
+
+    is_last
+        .into_iter()
+        .flat_map(|is_last| {
+            if is_last {
+                [' ', ' ', ' ']
+            } else {
+                [' ', '│', ' ']
+            }
+        })
+        .chain(match last {
+            None => [' '].as_slice().iter().copied(),
+            Some(true) => [' ', '└', '─', ' '].as_slice().iter().copied(),
+            Some(false) => [' ', '├', '─', ' '].as_slice().iter().copied(),
+        })
+        .skip(1)
 }
 
 #[cfg(test)]
@@ -334,15 +354,15 @@ mod test {
             node.as_tree_string().collect::<Vec<_>>(),
             vec![
                 String::from("root"),
-                String::from("--a"),
-                String::from("----aa"),
-                String::from("----ab"),
-                String::from("--b"),
-                String::from("----0"),
-                String::from("----1"),
-                String::from("----2"),
-                String::from("--c"),
-                String::from("--d"),
+                String::from("├─ a"),
+                String::from("│  ├─ aa"),
+                String::from("│  └─ ab"),
+                String::from("├─ b"),
+                String::from("│  ├─ 0"),
+                String::from("│  ├─ 1"),
+                String::from("│  └─ 2"),
+                String::from("├─ c"),
+                String::from("└─ d"),
             ]
         );
     }

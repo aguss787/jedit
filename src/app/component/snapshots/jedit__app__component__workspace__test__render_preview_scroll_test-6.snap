@@ -4,7 +4,7 @@ expression: "stateful_render_to_string(&worktree, &mut state)"
 ---
 "┌Tree──────────────────────┐┌Preview───────────────────────────────────────────┐"
 "│  root                   ↑││  6 t-param": {                                  ↑│"
-"│> --web-app              ║││  7 onfigGlossary:installationAt": "Philadelphia ║│"
+"│> └─ web-app             ║││  7 onfigGlossary:installationAt": "Philadelphia ║│"
 "│                         █││  8 onfigGlossary:adminEmail": "ksm@pobox.com",  █│"
 "│                         █││  9 onfigGlossary:poweredBy": "Cofax",           █│"
 "│                         █││ 10 onfigGlossary:poweredByIcon": "/images/cofax ║│"
