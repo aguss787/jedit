@@ -33,7 +33,7 @@ impl<'a> BoundedPopUp<'a> {
     }
 }
 
-impl<'a> Widget for BoundedPopUp<'a> {
+impl Widget for BoundedPopUp<'_> {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
         let paragraph = Paragraph::new(self.message.clone())
             .wrap(Wrap { trim: true })

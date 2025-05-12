@@ -258,7 +258,7 @@ impl<'a> WorkTreeStringIter<'a> {
     }
 }
 
-impl<'a> Iterator for WorkTreeStringIter<'a> {
+impl Iterator for WorkTreeStringIter<'_> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
