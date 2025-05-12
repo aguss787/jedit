@@ -14,6 +14,12 @@
 To install Jedit, ensure you have [Rust](https://www.rust-lang.org/tools/install) installed, then run:
 
 ```bash
+cargo install jedit --locked
+```
+
+or, to build from source:
+
+```bash
 git clone https://github.com/aguss787/jedit.git
 cd jedit
 cargo build --release
