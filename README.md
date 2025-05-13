@@ -60,6 +60,7 @@ Options:
 | e                 | Edit value             |
 | r                 | Rename key             |
 | d                 | Delete key             |
+| a                 | Append key             |
 | w                 | Save                   |
 | K                 | Preview up             |
 | J                 | Preview down           |
