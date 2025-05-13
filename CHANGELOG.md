@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/aguss787/jedit/compare/v0.1.3...v0.1.4) - 2025-05-13
+
+### Added
+
+- append new key
+
+### Fixed
+
+- expand action close nested child
+
+### Other
+
+- *(README)* add keybind for append
+- *(README)* update todo
+- *(README)* add todo for help window
+
 ## [0.1.3](https://github.com/aguss787/jedit/compare/v0.1.2...v0.1.3) - 2025-05-12
 
 ### Added
