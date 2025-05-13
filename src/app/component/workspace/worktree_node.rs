@@ -142,6 +142,46 @@ impl WorkTreeNode {
         );
     }
 
+    pub(crate) fn append_after(
+        &mut self,
+        index: usize,
+        key: Option<String>,
+        mut parent_metas: Vec<NodeMeta>,
+    ) {
+        let should_append = RefCell::new(true);
+        self.traverse_node_mut(
+            index,
+            &mut |_| {},
+            &mut |node: &mut WorkTreeNode, child_index| {
+                if *should_append.borrow() {
+                    let (Some(child), Some(child_index)) = (&mut node.child, child_index) else {
+                        return;
+                    };
+                    child.insert(
+                        child_index + 1,
+                        Self::new(key.clone().unwrap_or_default(), None),
+                    );
+                    let Some(meta) = node.meta else {
+                        return;
+                    };
+
+                    if matches!(meta.kind, NodeKind::Array) {
+                        for (index, child) in child.iter_mut().enumerate() {
+                            child.name = index.to_string();
+                        }
+                    }
+                    *should_append.borrow_mut() = false;
+                }
+
+                if !*should_append.borrow() {
+                    node.len += 1;
+                    node.meta = Some(parent_metas.pop().expect("missing parent meta"));
+                }
+            },
+            |_| {},
+        );
+    }
+
     pub fn close(&mut self, index: usize) {
         let old_len = RefCell::new(1);
         self.traverse_node_mut(

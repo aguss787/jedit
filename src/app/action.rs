@@ -78,6 +78,7 @@ pub(crate) enum WorkSpaceAction {
     Load { node: Node, is_edit: bool },
     Rename(ConfirmAction<(), Option<String>>),
     Delete(ConfirmAction<()>),
+    Add(ConfirmAction<(), Option<String>>),
 }
 
 impl From<WorkSpaceAction> for Action {

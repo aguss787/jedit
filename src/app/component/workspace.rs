@@ -28,7 +28,7 @@ use crate::{
         config::Config,
         math::Op,
     },
-    container::node::{Index, IndexKind, Node, NodeMeta},
+    container::node::{AddNodeKey, Index, IndexKind, Node, NodeMeta},
     error::MutationError,
 };
 
@@ -159,6 +159,9 @@ impl WorkSpace {
             KeyCode::Char('d') => {
                 actions.push(WorkSpaceAction::Delete(ConfirmAction::Request(())).into());
             }
+            KeyCode::Char('a') => {
+                actions.push(WorkSpaceAction::Add(ConfirmAction::Request(())).into());
+            }
             _ => {}
         }
     }
@@ -211,6 +214,9 @@ impl WorkSpace {
             }
             WorkSpaceAction::Delete(confirm_action) => {
                 self.handle_delete(state, confirm_action)?;
+            }
+            WorkSpaceAction::Add(confirm_action) => {
+                self.handle_add(state, confirm_action)?;
             }
             WorkSpaceAction::Save(confirm_action) => {
                 self.dialogs.pop();
@@ -387,6 +393,85 @@ impl WorkSpace {
 }
 
 impl WorkSpace {
+    fn handle_add(
+        &mut self,
+        state: &mut WorkSpaceState,
+        confirm_action: ConfirmAction<(), Option<String>>,
+    ) -> std::io::Result<()> {
+        let Some(index) = self.index_for_mutation(state) else {
+            return Ok(());
+        };
+
+        let new_key = match confirm_action {
+            ConfirmAction::Request(_) => {
+                let mut selector = self.work_tree_root.selector(index);
+                selector.pop();
+                let meta = self
+                    .file_root
+                    .subtree(&selector)
+                    .expect("broken selector")
+                    .as_index();
+
+                if !matches!(meta.kind, IndexKind::Array(_)) {
+                    self.dialogs.push(Box::new(
+                        TextConfirmDialog::new(Box::new(ConfirmAction::action_confirmer(
+                            WorkSpaceAction::Add,
+                        )))
+                        .title(Line::from("Append key")),
+                    ));
+
+                    return Ok(());
+                }
+
+                None
+            }
+            ConfirmAction::Confirm(new_key) => {
+                self.dialogs.pop();
+                let Some(new_key) = new_key else {
+                    return Ok(());
+                };
+                Some(new_key)
+            }
+        };
+
+        let add_node_key = match &new_key {
+            Some(new_key) => AddNodeKey::Object(new_key.clone()),
+            None => AddNodeKey::Array,
+        };
+        let mut selector = self.work_tree_root.selector(index);
+        match self
+            .file_root
+            .append_after(&selector, add_node_key, Node::null())
+        {
+            Err(MutationError::DuplicateKey) => {
+                self.dialogs.push(Box::new(
+                    TextConfirmDialog::new(Box::new(ConfirmAction::action_confirmer(
+                        WorkSpaceAction::Add,
+                    )))
+                    .title("Rename".into())
+                    .content(new_key.unwrap_or_default()),
+                ));
+                self.dialogs
+                    .push(Box::new(ErrorConfirmDialog::new("Duplicate key".into())));
+                return Ok(());
+            }
+            Err(err) => {
+                panic!("broken selector {err}")
+            }
+            Ok(_) => {}
+        }
+        selector.pop();
+        let parent_metas = self.file_root.metas(&selector).expect("broken selector");
+        self.work_tree_root
+            .append_after(index, new_key, parent_metas);
+        self.is_edited = true;
+        self.list = new_list(&self.work_tree_root);
+        state.list_state.select_next();
+        self.set_preview_to_selected(state, false);
+
+        Ok(())
+    }
+
     fn handle_delete(
         &mut self,
         state: &mut WorkSpaceState,
@@ -1599,6 +1684,90 @@ mod test {
         );
 
         worktree.test_action(&mut state, NavigationAction::Top.into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_append_after_into_array_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default().with_max_preview_size(Byte::from_u64(3700)),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, WorkSpaceAction::Add(ConfirmAction::Request(())));
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(&mut state, NavigationAction::Down(1).into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(&mut state, NavigationAction::Down(4).into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_append_after_into_object_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default().with_max_preview_size(Byte::from_u64(3700)),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, WorkSpaceAction::Add(ConfirmAction::Request(())));
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Add(ConfirmAction::Confirm(None)),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Add(ConfirmAction::Confirm(Some(String::from("new_key")))),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(&mut state, NavigationAction::Down(1).into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(&mut state, NavigationAction::Down(3).into());
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_append_after_into_object_key_exists_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default().with_max_preview_size(Byte::from_u64(3700)),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, WorkSpaceAction::Add(ConfirmAction::Request(())));
+
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Add(ConfirmAction::Confirm(Some(String::from("taglib")))),
+        );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(&mut state, WorkSpaceAction::ErrorConfirmed);
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+
+        worktree.test_action(
+            &mut state,
+            WorkSpaceAction::Add(ConfirmAction::Confirm(Some(String::from("taglib2")))),
+        );
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 

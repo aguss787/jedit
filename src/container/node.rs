@@ -114,10 +114,24 @@ impl Kind {
 }
 
 #[derive(Debug)]
+pub enum AddNodeKey {
+    Array,
+    Object(String),
+}
+
+#[derive(Debug)]
 pub enum NodeMutation<'a> {
     Replace(Node),
     Delete(&'a str),
-    Rename { before: &'a str, after: String },
+    Append {
+        after: &'a str,
+        key: AddNodeKey,
+        node: Node,
+    },
+    Rename {
+        before: &'a str,
+        after: String,
+    },
 }
 
 impl Node {
@@ -166,6 +180,28 @@ impl Node {
             NodeMutation::Delete(selector[len - 1].deref()),
         )
         .map(|res| res.expect("delete mutation should return the old node"))
+    }
+
+    pub fn append_after<T: Deref<Target = str>>(
+        &mut self,
+        selector: &[T],
+        key: AddNodeKey,
+        node: Node,
+    ) -> Result<(), MutationError> {
+        let len = selector.len();
+        if len == 0 {
+            return Err(IndexingError::NotIndexable.into());
+        }
+
+        self.mutate(
+            Selector::new(&selector[..len - 1]),
+            NodeMutation::Append {
+                after: selector[len - 1].deref(),
+                key,
+                node,
+            },
+        )
+        .map(|_| ())
     }
 
     pub fn rename<T: Deref<Target = str>>(
@@ -381,6 +417,59 @@ impl Node {
                     std::mem::swap(self, &mut new_node);
                     Ok(Some(new_node))
                 }
+                NodeMutation::Append {
+                    after,
+                    key: AddNodeKey::Array,
+                    node,
+                } => match &mut self.data {
+                    Kind::Array(child) => {
+                        let index = after
+                            .parse::<usize>()
+                            .map_err(|_| IndexingError::MissingKey(after.to_string()))?;
+                        if child.is_empty() {
+                            self.n_lines = 2 + node.n_lines;
+                            self.n_bytes = 3 + node.indented_n_bytes();
+                        } else {
+                            self.n_lines += node.n_lines;
+                            self.n_bytes += node.indented_n_bytes() + 2;
+                        }
+                        child.insert(index + 1, node);
+                        Ok(None)
+                    }
+                    Kind::Object(_)
+                    | Kind::Null
+                    | Kind::Bool(_)
+                    | Kind::Number(_)
+                    | Kind::String(_) => Err(IndexingError::NotIndexable.into()),
+                },
+                NodeMutation::Append {
+                    after,
+                    key: AddNodeKey::Object(new_key),
+                    node,
+                } => match &mut self.data {
+                    Kind::Object(index_map) => {
+                        if index_map.contains_key(&new_key) {
+                            return Err(MutationError::DuplicateKey);
+                        }
+                        let Some(index) = index_map.get_index_of(after) else {
+                            return Err(IndexingError::MissingKey(after.to_string()).into());
+                        };
+                        if index_map.is_empty() {
+                            self.n_lines = 2 + node.n_lines;
+                            self.n_bytes = 7 + new_key.len() + node.indented_n_bytes();
+                        } else {
+                            self.n_lines += node.n_lines;
+                            self.n_bytes += node.indented_n_bytes() + new_key.len() + 6;
+                        }
+                        index_map.insert_before(index + 1, new_key, node);
+                        Ok(None)
+                    }
+                    Kind::Array(_)
+                    | Kind::Null
+                    | Kind::Bool(_)
+                    | Kind::Number(_)
+                    | Kind::String(_) => Err(IndexingError::NotIndexable.into()),
+                },
                 NodeMutation::Delete(key) => match &mut self.data {
                     Kind::Array(child) => {
                         let index = key
@@ -969,6 +1058,76 @@ mod test {
         node.delete(&["other_key"]).unwrap();
 
         assert_eq!(node, Node::from_serde_json(json!({})).unwrap());
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn append_after_into_object() {
+        let original = json!({
+            "key": "1",
+            "other_key": "2",
+            "new_key": {
+                "nested": "value"
+            }
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        node.append_after(
+            &["other_key"],
+            AddNodeKey::Object(String::from("k")),
+            Node::bool(true),
+        )
+        .unwrap();
+        assert_eq!(
+            node.append_after(
+                &["new_key"],
+                AddNodeKey::Object(String::from("k")),
+                Node::bool(true),
+            )
+            .unwrap_err(),
+            MutationError::DuplicateKey
+        );
+
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
+                "key": "1",
+                "other_key": "2",
+                "k": true,
+                "new_key": {
+                    "nested": "value"
+                }
+            }))
+            .unwrap()
+        );
+
+        node.assert_all_meta();
+    }
+
+    #[test]
+    fn append_after_into_array() {
+        let original = json!({
+            "key": "1",
+            "other_key": "2",
+            "new_key": [true, "false"]
+        });
+
+        let mut node = Node::from_serde_json(original).unwrap();
+        node.append_after(&["new_key", "0"], AddNodeKey::Array, Node::null())
+            .unwrap();
+        node.append_after(&["new_key", "2"], AddNodeKey::Array, Node::null())
+            .unwrap();
+
+        assert_eq!(
+            node,
+            Node::from_serde_json(json!({
+                "key": "1",
+                "other_key": "2",
+                "new_key": [true, null, "false", null]
+            }))
+            .unwrap()
+        );
 
         node.assert_all_meta();
     }
