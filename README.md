@@ -75,6 +75,6 @@ Options:
 - [ ] Custom keybind
 - [ ] Search
 - [ ] Inline key operation
-  - [ ] Add new key
+  - [ ] Add new child key
 - [ ] Prettier error message
 - [ ] Help window
