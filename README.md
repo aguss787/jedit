@@ -77,3 +77,4 @@ Options:
 - [ ] Inline key operation
   - [ ] Add new key
 - [ ] Prettier error message
+- [ ] Help window
