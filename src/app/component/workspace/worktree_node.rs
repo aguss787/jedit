@@ -55,6 +55,10 @@ impl WorkTreeNode {
         res
     }
 
+    pub fn is_expanded(&self, index: usize) -> bool {
+        self.traverse_node(index, &mut |_| {}, &mut |_| {}, |node| node.child.is_some())
+    }
+
     pub fn reindex(&mut self, index: usize, node_index: Index, force: bool) {
         let (len, child) = match node_index.kind {
             IndexKind::Terminal => (1, Vec::new()),

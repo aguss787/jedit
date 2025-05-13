@@ -296,6 +296,9 @@ impl WorkSpace {
     }
 
     fn expand(&mut self, index: usize) -> bool {
+        if self.work_tree_root.is_expanded(index) {
+            return false;
+        }
         let selector = self.work_tree_root.selector(index);
         let node_index = self
             .file_root
@@ -1768,6 +1771,22 @@ mod test {
             &mut state,
             WorkSpaceAction::Add(ConfirmAction::Confirm(Some(String::from("taglib2")))),
         );
+        assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
+    }
+
+    #[test]
+    fn render_test_expand_expanded_test() {
+        let mut worktree = WorkSpace::new(
+            Node::load(SAMPLE_JSON.as_bytes()).unwrap(),
+            Config::default().with_max_preview_size(Byte::from_u64(3700)),
+        );
+        let mut state = WorkSpaceState::default();
+
+        worktree.test_action(&mut state, NavigationAction::TogglePreview.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
+        worktree.test_action(&mut state, NavigationAction::Top.into());
+        worktree.test_action(&mut state, NavigationAction::Expand.into());
         assert_snapshot!(stateful_render_to_string(&worktree, &mut state));
     }
 
