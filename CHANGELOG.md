@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5](https://github.com/aguss787/jedit/compare/v0.1.4...v0.1.5) - 2025-06-10
+
+### Other
+
+- *(deps)* bump toml from 0.8.22 to 0.8.23
+- *(deps)* bump clap from 4.5.38 to 4.5.40
+
 ## [0.1.4](https://github.com/aguss787/jedit/compare/v0.1.3...v0.1.4) - 2025-05-13
 
 ### Added
